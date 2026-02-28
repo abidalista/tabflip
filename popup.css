@@ -1,174 +1,57 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
   width: 280px;
-  background: #0f0f1a;
-  color: #fff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #1a1a1a;
+  font-family: 'Inter', -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 .popup {
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-/* ── Header ───────────────────────────────────────────────────────── */
+.name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
 
-.header {
+.shortcut-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 8px;
 }
 
-.logo-mark {
-  flex-shrink: 0;
+.pill {
+  background: #2a2a2a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
 }
 
-.wordmark {
-  font-size: 22px;
-  font-weight: 900;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #7B61FF, #E040FB);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-/* ── Shortcut tagline ─────────────────────────────────────────────── */
-
-.shortcut {
+.label {
   font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.45);
-  line-height: 1.5;
-  margin-bottom: 16px;
+  color: #888;
 }
-
-.shortcut kbd {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.8);
-}
-
-/* ── Divider ──────────────────────────────────────────────────────── */
 
 .divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.06);
-  margin: 14px 0;
+  background: #2a2a2a;
 }
 
-/* ── Keyboard hints ───────────────────────────────────────────────── */
-
-.hints {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.hint-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.keys {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
-  white-space: nowrap;
-}
-
-kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 6px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.hint-label {
+.coffee {
   font-size: 12px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-/* ── Test button ──────────────────────────────────────────────────── */
-
-.test-btn {
-  display: block;
-  width: 100%;
-  padding: 9px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
-  color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  margin-bottom: 10px;
-}
-
-.test-btn:hover {
-  background: rgba(123, 97, 255, 0.1);
-  border-color: rgba(123, 97, 255, 0.25);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-/* ── Links ────────────────────────────────────────────────────────── */
-
-.link {
-  display: block;
-  text-align: center;
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(123, 97, 255, 0.7);
-  text-decoration: none;
-  margin-bottom: 14px;
-  transition: color 0.15s;
-}
-
-.link:hover {
   color: #7B61FF;
-}
-
-/* ── Coffee button ────────────────────────────────────────────────── */
-
-.coffee-btn {
-  display: block;
-  width: 100%;
-  padding: 11px;
-  text-align: center;
-  background: linear-gradient(135deg, #7B61FF, #E040FB);
-  color: #fff;
   text-decoration: none;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -0.2px;
-  transition: opacity 0.15s;
 }
 
-.coffee-btn:hover {
-  opacity: 0.88;
+.coffee:hover {
+  text-decoration: underline;
 }
