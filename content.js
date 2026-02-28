@@ -1,9 +1,7 @@
 // TabFlip — content script
-// No guard. Each injection gets fresh listeners with a valid chrome.runtime.
-// Old dead listeners from previous extension contexts will throw and do nothing.
 
 (() => {
-  // Remove any leftover overlay from a previous injection
+  // Clean up overlay from previous injection (extension reload)
   const old = document.getElementById("tabflip-overlay");
   if (old) old.remove();
 
@@ -11,6 +9,7 @@
   let tabs = [];
   let selectedIndex = 0;
   let overlayVisible = false;
+  let mruReady = false;
 
   // ── DOM ──────────────────────────────────────────────────────────────
 
@@ -19,7 +18,6 @@
     overlayEl.id = "tabflip-overlay";
     overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
     document.body.appendChild(overlayEl);
-    console.log("[TabFlip] overlay element created");
   }
 
   function showOverlay() {
@@ -27,12 +25,12 @@
     renderCards();
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
-    console.log("[TabFlip] overlay shown, tabs:", tabs.length, "selected:", selectedIndex);
   }
 
   function hideOverlay() {
     if (overlayEl) overlayEl.classList.remove("tabflip-overlay--visible");
     overlayVisible = false;
+    mruReady = false;
   }
 
   function renderCards() {
@@ -47,7 +45,6 @@
       const card = document.createElement("div");
       card.className = "tabflip-card" + (selected ? " tabflip-card--selected" : "");
 
-      // Screenshot
       const wrap = document.createElement("div");
       wrap.className = "tabflip-card__screenshot-wrap";
       const shot = document.createElement("div");
@@ -67,7 +64,6 @@
       }
       wrap.appendChild(shot);
 
-      // Meta
       const meta = document.createElement("div");
       meta.className = "tabflip-card__meta";
 
@@ -114,20 +110,17 @@
 
   // ── Messaging ────────────────────────────────────────────────────────
 
-  async function getMRU() {
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "getMRU" });
-      console.log("[TabFlip] getMRU response:", res);
+  function prefetchMRU() {
+    // Fire-and-forget: pre-load MRU data so it's ready when Q is pressed
+    chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
+      if (chrome.runtime.lastError) return; // extension context dead
       tabs = (res && res.tabs) ? res.tabs : [];
-    } catch (err) {
-      console.error("[TabFlip] getMRU failed:", err.message);
-      tabs = [];
-    }
+      mruReady = true;
+    });
   }
 
   function switchToSelected() {
     if (selectedIndex >= 0 && selectedIndex < tabs.length) {
-      console.log("[TabFlip] switching to tab", tabs[selectedIndex].id);
       chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
     }
     hideOverlay();
@@ -135,8 +128,14 @@
 
   // ── Keyboard ─────────────────────────────────────────────────────────
 
-  document.addEventListener("keydown", async (e) => {
-    // Escape: close overlay, do nothing
+  document.addEventListener("keydown", (e) => {
+    // When Alt/Option is pressed alone, pre-fetch MRU immediately
+    if (e.key === "Alt") {
+      prefetchMRU();
+      return;
+    }
+
+    // Escape: close overlay
     if (e.key === "Escape" && overlayVisible) {
       e.preventDefault();
       e.stopPropagation();
@@ -148,19 +147,28 @@
     if (e.altKey && (e.code === "KeyQ" || e.key === "q" || e.key === "Q")) {
       e.preventDefault();  // stops œ on Mac
       e.stopPropagation();
-      console.log("[TabFlip] Alt+Q keydown, overlayVisible:", overlayVisible);
+
+      // If MRU wasn't pre-fetched yet (e.g. rapid press), fetch now
+      if (!mruReady) {
+        chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
+          if (chrome.runtime.lastError) return;
+          tabs = (res && res.tabs) ? res.tabs : [];
+          mruReady = true;
+          if (tabs.length >= 2) {
+            selectedIndex = e.shiftKey ? tabs.length - 1 : 1;
+            showOverlay();
+          }
+        });
+        return;
+      }
 
       if (!overlayVisible) {
-        // First press: fetch MRU, show overlay
-        await getMRU();
-        if (tabs.length < 2) {
-          console.log("[TabFlip] <2 tabs, nothing to show");
-          return;
-        }
+        // First Q press: show overlay (data already loaded from prefetch)
+        if (tabs.length < 2) return;
         selectedIndex = e.shiftKey ? tabs.length - 1 : 1;
         showOverlay();
       } else {
-        // Subsequent presses: advance selection
+        // Subsequent Q presses: advance selection
         const delta = e.shiftKey ? -1 : 1;
         selectedIndex = (selectedIndex + delta + tabs.length) % tabs.length;
         renderCards();
@@ -168,10 +176,9 @@
     }
   }, true);
 
-  // Alt/Option release: commit the switch
+  // Alt/Option released: commit switch
   document.addEventListener("keyup", (e) => {
     if (e.key === "Alt" && overlayVisible) {
-      console.log("[TabFlip] Alt released, committing switch");
       switchToSelected();
     }
   }, true);
@@ -180,17 +187,16 @@
     if (overlayVisible) hideOverlay();
   });
 
-  // Listen for trigger from background (test button / command)
+  // Message listener for programmatic trigger
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "showOverlay") {
-      (async () => {
-        await getMRU();
+      chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
+        if (chrome.runtime.lastError) return;
+        tabs = (res && res.tabs) ? res.tabs : [];
         if (tabs.length < 1) return;
         selectedIndex = Math.min(1, tabs.length - 1);
         showOverlay();
-      })();
+      });
     }
   });
-
-  console.log("[TabFlip] content script ready on", location.hostname);
 })();
