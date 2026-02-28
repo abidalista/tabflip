@@ -1,4 +1,18 @@
-/* TabFlip — overlay styles */
+/* TabFlip — overlay styles
+   Matches Arc-style horizontal switcher with screenshot previews */
+
+/* ── Reset for shadow DOM isolation ───────────────────────────────── */
+
+#tabflip-overlay,
+#tabflip-overlay * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Overlay root ─────────────────────────────────────────────────── */
 
 #tabflip-overlay {
   position: fixed;
@@ -20,73 +34,79 @@
   pointer-events: auto;
 }
 
+/* ── Switcher container ───────────────────────────────────────────── */
+
 #tabflip-container {
-  background: #2a2a2a;
-  border-radius: 16px;
-  padding: 16px 20px;
-  box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
+  position: relative;
+  padding: 28px 32px;
+  border-radius: 20px;
 }
 
-#tabflip-cards {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-/* ── Card ─────────────────────────────────────────────────────────── */
-
-.tabflip-card {
-  width: 200px;
-  background: #1e1e1e;
-  border-radius: 12px;
-  border: 2px solid #3a3a3a;
-  overflow: hidden;
-  cursor: pointer;
-  transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
-  flex-shrink: 0;
-}
-
-.tabflip-card--selected {
-  transform: scale(1.05);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  box-shadow:
-    0 0 0 2px #7B61FF,
-    0 0 20px rgba(123, 97, 255, 0.4),
-    0 0 40px rgba(224, 64, 251, 0.2),
-    0 8px 32px rgba(0, 0, 0, 0.5);
-  /* Gradient border via outline trick — using box-shadow instead for cleaner look */
-}
-
-/* Gradient glow ring for selected card */
-.tabflip-card--selected::before {
+/* Blurred backdrop */
+#tabflip-container::before {
   content: "";
   position: absolute;
-  inset: -2px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #7B61FF, #E040FB);
+  inset: 0;
+  background: rgba(15, 15, 35, 0.82);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 32px 80px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: -1;
 }
 
-/* Need relative positioning for the pseudo-element */
-.tabflip-card--selected {
-  position: relative;
-  z-index: 1;
+/* ── Cards row ────────────────────────────────────────────────────── */
+
+#tabflip-cards {
+  display: flex;
+  align-items: center;
+  gap: 20px;
 }
 
-/* ── Screenshot area ──────────────────────────────────────────────── */
+/* ── Individual card ──────────────────────────────────────────────── */
+
+.tabflip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 180px;
+  cursor: pointer;
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease;
+  flex-shrink: 0;
+}
+
+/* ── Inactive card ────────────────────────────────────────────────── */
+
+.tabflip-card:not(.tabflip-card--selected) {
+  opacity: 0.45;
+  transform: scale(0.92);
+}
+
+.tabflip-card:not(.tabflip-card--selected):hover {
+  opacity: 0.7;
+  transform: scale(0.97);
+}
+
+/* ── Screenshot wrapper ───────────────────────────────────────────── */
+
+.tabflip-card__screenshot-wrap {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
 
 .tabflip-card__screenshot {
-  width: 200px;
-  height: 140px;
-  overflow: hidden;
-  background: #151515;
   position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #1a1a2e;
+  overflow: hidden;
 }
 
 .tabflip-card__screenshot img {
@@ -96,60 +116,129 @@
   display: block;
 }
 
+/* Dim overlay for inactive screenshots */
+.tabflip-card:not(.tabflip-card--selected) .tabflip-card__screenshot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* ── Empty screenshot placeholder ─────────────────────────────────── */
+
 .tabflip-card__screenshot--empty {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e, #252545);
 }
 
 .tabflip-card__placeholder {
-  font-size: 36px;
-  font-weight: 700;
-  color: #555;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.15);
   user-select: none;
 }
 
-/* ── Meta (favicon + title) ───────────────────────────────────────── */
+/* ── Meta (favicon + title + url) ─────────────────────────────────── */
 
 .tabflip-card__meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 0 2px;
   min-width: 0;
+}
+
+.tabflip-card__favicon-wrap {
+  width: 22px;
+  height: 22px;
+  background: #1e1e2e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .tabflip-card__favicon {
   width: 14px;
   height: 14px;
   border-radius: 2px;
-  flex-shrink: 0;
+}
+
+.tabflip-card__favicon-letter {
+  font-size: 11px;
+  font-weight: 700;
+  color: #888;
+}
+
+.tabflip-card__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .tabflip-card__title {
-  font-size: 11px;
-  font-weight: 500;
-  color: #ccc;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c8c8d8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.3;
+}
+
+.tabflip-card__url {
+  font-size: 10px;
+  font-weight: 400;
+  color: #666680;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+/* ── Selected card ────────────────────────────────────────────────── */
+
+.tabflip-card--selected {
+  width: 220px;
+  opacity: 1;
+  transform: scale(1.08);
+  z-index: 10;
+}
+
+/* Gradient glow border on selected screenshot */
+.tabflip-card--selected .tabflip-card__screenshot-wrap {
+  padding: 3px;
+  background: linear-gradient(135deg, #7B61FF, #d946ef, #E040FB);
+  border: none;
+  border-radius: 13px;
+  box-shadow:
+    0 0 30px rgba(123, 97, 255, 0.4),
+    0 0 60px rgba(224, 64, 251, 0.15),
+    0 20px 50px -12px rgba(123, 97, 255, 0.45);
+}
+
+.tabflip-card--selected .tabflip-card__screenshot {
+  border-radius: 10px;
+}
+
+.tabflip-card--selected .tabflip-card__favicon-wrap {
+  border-color: rgba(123, 97, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(123, 97, 255, 0.15);
 }
 
 .tabflip-card--selected .tabflip-card__title {
   color: #fff;
+  font-size: 13px;
 }
 
-/* ── Unselected cards: dimmer ─────────────────────────────────────── */
-
-.tabflip-card:not(.tabflip-card--selected) {
-  opacity: 0.75;
-  transform: scale(0.95);
+.tabflip-card--selected .tabflip-card__url {
+  color: #8888a8;
 }
 
-.tabflip-card:not(.tabflip-card--selected):hover {
-  opacity: 0.9;
-  border-color: #555;
+.tabflip-card--selected .tabflip-card__favicon-letter {
+  color: #7B61FF;
 }

@@ -7,10 +7,21 @@
   let selectedIndex = 0;
   let altHeld = false;
   let overlayVisible = false;
-  let qCount = 0; // how many times Q pressed while alt held
-  let switchTimer = null; // for quick tap detection
+  let qCount = 0;
+  let switchTimer = null;
 
-  const SWITCH_DELAY = 200; // ms — if alt released within this after first Q, it's a quick-tap
+  const SWITCH_DELAY = 200;
+
+  // ── Helpers ────────────────────────────────────────────────────────
+
+  function extractDomain(url) {
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./, "");
+    } catch (_) {
+      return "";
+    }
+  }
 
   // ── Build overlay DOM ──────────────────────────────────────────────
 
@@ -19,9 +30,8 @@
 
     overlayEl = document.createElement("div");
     overlayEl.id = "tabflip-overlay";
-    overlayEl.innerHTML = `<div id="tabflip-container"><div id="tabflip-cards"></div></div>`;
+    overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
 
-    // Attach to documentElement to work even before body exists
     (document.body || document.documentElement).appendChild(overlayEl);
   }
 
@@ -31,11 +41,17 @@
     container.innerHTML = "";
 
     tabs.forEach((tab, i) => {
+      const isSelected = i === selectedIndex;
       const card = document.createElement("div");
-      card.className = "tabflip-card" + (i === selectedIndex ? " tabflip-card--selected" : "");
+      card.className = "tabflip-card" + (isSelected ? " tabflip-card--selected" : "");
+
+      // Screenshot wrapper (holds gradient border for selected)
+      const screenshotWrap = document.createElement("div");
+      screenshotWrap.className = "tabflip-card__screenshot-wrap";
 
       const screenshotEl = document.createElement("div");
       screenshotEl.className = "tabflip-card__screenshot";
+
       if (tab.screenshot) {
         const img = document.createElement("img");
         img.src = tab.screenshot;
@@ -49,28 +65,57 @@
         screenshotEl.appendChild(placeholder);
       }
 
+      screenshotWrap.appendChild(screenshotEl);
+
+      // Meta row: favicon + title/url
       const meta = document.createElement("div");
       meta.className = "tabflip-card__meta";
 
-      const favicon = document.createElement("img");
-      favicon.className = "tabflip-card__favicon";
-      favicon.src = tab.favIconUrl || "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22><rect fill=%22%23555%22 width=%221%22 height=%221%22/></svg>";
-      favicon.width = 14;
-      favicon.height = 14;
-      favicon.onerror = function() {
-        this.style.display = "none";
-      };
+      const faviconWrap = document.createElement("div");
+      faviconWrap.className = "tabflip-card__favicon-wrap";
+
+      if (tab.favIconUrl) {
+        const favicon = document.createElement("img");
+        favicon.className = "tabflip-card__favicon";
+        favicon.src = tab.favIconUrl;
+        favicon.width = 14;
+        favicon.height = 14;
+        favicon.onerror = function () {
+          // Replace broken favicon with letter
+          this.replaceWith(createLetterFavicon(tab.title));
+        };
+        faviconWrap.appendChild(favicon);
+      } else {
+        faviconWrap.appendChild(createLetterFavicon(tab.title));
+      }
+
+      const textCol = document.createElement("div");
+      textCol.className = "tabflip-card__text";
 
       const title = document.createElement("span");
       title.className = "tabflip-card__title";
       title.textContent = tab.title || "Untitled";
 
-      meta.appendChild(favicon);
-      meta.appendChild(title);
-      card.appendChild(screenshotEl);
+      const url = document.createElement("span");
+      url.className = "tabflip-card__url";
+      url.textContent = extractDomain(tab.url);
+
+      textCol.appendChild(title);
+      textCol.appendChild(url);
+      meta.appendChild(faviconWrap);
+      meta.appendChild(textCol);
+
+      card.appendChild(screenshotWrap);
       card.appendChild(meta);
       container.appendChild(card);
     });
+  }
+
+  function createLetterFavicon(title) {
+    const span = document.createElement("span");
+    span.className = "tabflip-card__favicon-letter";
+    span.textContent = title ? title.charAt(0).toUpperCase() : "?";
+    return span;
   }
 
   function showOverlay() {
@@ -145,19 +190,18 @@
       if (!overlayVisible) {
         // First press — fetch MRU and show overlay
         await fetchMRU();
-        if (tabs.length < 2) return; // nothing to switch to
+        if (tabs.length < 2) return;
 
         qCount = 1;
 
         if (e.shiftKey) {
-          selectedIndex = tabs.length - 1; // wrap to end
+          selectedIndex = tabs.length - 1;
         } else {
-          selectedIndex = 1; // start at second tab (first is current)
+          selectedIndex = 1;
         }
 
         showOverlay();
 
-        // Start quick-tap timer. If alt releases quickly, treat as instant switch
         switchTimer = setTimeout(() => {
           switchTimer = null;
         }, SWITCH_DELAY);
