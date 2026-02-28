@@ -1,6 +1,8 @@
 // TabFlip — content script: overlay UI + keyboard handling
 
 (() => {
+  console.log("[TabFlip] Content script loaded on", location.href);
+
   // ── State ──────────────────────────────────────────────────────────
   let overlayEl = null;
   let tabs = [];
@@ -25,18 +27,20 @@
 
   // ── Build overlay DOM ──────────────────────────────────────────────
 
-  function createOverlay() {
-    if (overlayEl) return;
+  function ensureOverlay() {
+    if (overlayEl && document.contains(overlayEl)) return;
 
     overlayEl = document.createElement("div");
     overlayEl.id = "tabflip-overlay";
     overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
 
-    (document.body || document.documentElement).appendChild(overlayEl);
+    const target = document.body || document.documentElement;
+    target.appendChild(overlayEl);
+    console.log("[TabFlip] Overlay injected into DOM");
   }
 
   function renderCards() {
-    if (!overlayEl) createOverlay();
+    ensureOverlay();
     const container = overlayEl.querySelector("#tabflip-cards");
     container.innerHTML = "";
 
@@ -67,7 +71,7 @@
 
       screenshotWrap.appendChild(screenshotEl);
 
-      // Meta row: favicon + title/url
+      // Meta row
       const meta = document.createElement("div");
       meta.className = "tabflip-card__meta";
 
@@ -81,7 +85,6 @@
         favicon.width = 14;
         favicon.height = 14;
         favicon.onerror = function () {
-          // Replace broken favicon with letter
           this.replaceWith(createLetterFavicon(tab.title));
         };
         faviconWrap.appendChild(favicon);
@@ -111,18 +114,19 @@
     });
   }
 
-  function createLetterFavicon(title) {
+  function createLetterFavicon(tabTitle) {
     const span = document.createElement("span");
     span.className = "tabflip-card__favicon-letter";
-    span.textContent = title ? title.charAt(0).toUpperCase() : "?";
+    span.textContent = tabTitle ? tabTitle.charAt(0).toUpperCase() : "?";
     return span;
   }
 
   function showOverlay() {
-    if (!overlayEl) createOverlay();
+    ensureOverlay();
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
     renderCards();
+    console.log("[TabFlip] Overlay shown with", tabs.length, "tabs, selected:", selectedIndex);
   }
 
   function hideOverlay() {
@@ -149,6 +153,7 @@
       return;
     }
     const tab = tabs[selectedIndex];
+    console.log("[TabFlip] Switching to tab:", tab.id, tab.title);
     chrome.runtime.sendMessage({ type: "switchTab", tabId: tab.id });
     hideOverlay();
   }
@@ -156,18 +161,22 @@
   async function fetchMRU() {
     try {
       const response = await chrome.runtime.sendMessage({ type: "getMRU" });
+      console.log("[TabFlip] MRU response:", response);
       if (response && response.tabs) {
         tabs = response.tabs;
       }
-    } catch (_) {
+    } catch (err) {
+      console.error("[TabFlip] Failed to fetch MRU:", err);
       tabs = [];
     }
   }
 
   // ── Keyboard handling ──────────────────────────────────────────────
+  // We listen on the document with capture=true so we fire before
+  // any page scripts can swallow the event.
 
   document.addEventListener("keydown", async (e) => {
-    // Track alt/option state
+    // Track alt/option key
     if (e.key === "Alt") {
       altHeld = true;
       return;
@@ -182,31 +191,29 @@
       return;
     }
 
-    // Q while alt/option held — prevent œ character on Mac
+    // Q while alt/option is held
+    // e.code === "KeyQ" is the physical key (works regardless of Option producing œ)
+    // e.altKey is true if alt/option is currently pressed (backup for altHeld)
     if (e.code === "KeyQ" && (altHeld || e.altKey)) {
-      e.preventDefault();
+      e.preventDefault(); // prevent œ on Mac
       e.stopPropagation();
+      console.log("[TabFlip] Alt+Q detected, overlayVisible:", overlayVisible, "altHeld:", altHeld, "e.altKey:", e.altKey);
 
       if (!overlayVisible) {
-        // First press — fetch MRU and show overlay
         await fetchMRU();
-        if (tabs.length < 2) return;
-
-        qCount = 1;
-
-        if (e.shiftKey) {
-          selectedIndex = tabs.length - 1;
-        } else {
-          selectedIndex = 1;
+        if (tabs.length < 2) {
+          console.log("[TabFlip] Not enough tabs:", tabs.length);
+          return;
         }
 
+        qCount = 1;
+        selectedIndex = e.shiftKey ? tabs.length - 1 : 1;
         showOverlay();
 
         switchTimer = setTimeout(() => {
           switchTimer = null;
         }, SWITCH_DELAY);
       } else {
-        // Subsequent presses — move selection
         qCount++;
         if (e.shiftKey) {
           moveSelection(-1);
@@ -220,18 +227,38 @@
   document.addEventListener("keyup", (e) => {
     if (e.key === "Alt") {
       altHeld = false;
-
       if (overlayVisible) {
+        console.log("[TabFlip] Alt released — committing switch");
         commitSwitch();
       }
     }
   }, true);
 
-  // Handle edge case: window/tab blur while alt held
+  // Window blur: close overlay and reset state
   window.addEventListener("blur", () => {
     if (overlayVisible) {
       hideOverlay();
     }
     altHeld = false;
+  });
+
+  // ── Message listener (for test trigger from popup/background) ──────
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "triggerOverlay") {
+      console.log("[TabFlip] Trigger received from background");
+      (async () => {
+        await fetchMRU();
+        if (tabs.length < 1) {
+          console.log("[TabFlip] No tabs in MRU");
+          return;
+        }
+        selectedIndex = Math.min(1, tabs.length - 1);
+        showOverlay();
+        // Auto-close after 5s if no keyboard interaction (it's a test)
+        setTimeout(() => {
+          if (overlayVisible) hideOverlay();
+        }, 5000);
+      })();
+    }
   });
 })();

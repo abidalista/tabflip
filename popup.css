@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+
 * {
   margin: 0;
   padding: 0;
@@ -5,91 +7,168 @@
 }
 
 body {
-  width: 300px;
-  background: #1a1a1a;
+  width: 280px;
+  background: #0f0f1a;
   color: #fff;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 .popup {
   padding: 20px;
 }
 
-.logo {
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.header {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 16px;
 }
 
-.logo h1 {
-  font-size: 20px;
-  font-weight: 700;
+.logo-mark {
+  flex-shrink: 0;
+}
+
+.wordmark {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.5px;
   background: linear-gradient(135deg, #7B61FF, #E040FB);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
+/* ── Shortcut tagline ─────────────────────────────────────────────── */
+
 .shortcut {
   font-size: 13px;
-  color: #aaa;
-  margin-bottom: 16px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
   line-height: 1.5;
+  margin-bottom: 16px;
 }
 
-kbd {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 11px;
-  font-family: inherit;
-  background: #333;
-  border: 1px solid #555;
-  border-radius: 4px;
-  color: #fff;
+.shortcut kbd {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
 }
+
+/* ── Divider ──────────────────────────────────────────────────────── */
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 14px 0;
+}
+
+/* ── Keyboard hints ───────────────────────────────────────────────── */
 
 .hints {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: 10px;
 }
 
-.hint {
+.hint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.hint-label {
   font-size: 12px;
-  color: #888;
-  line-height: 1.4;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
 }
 
-.customize-link {
+/* ── Test button ──────────────────────────────────────────────────── */
+
+.test-btn {
   display: block;
+  width: 100%;
+  padding: 9px;
   text-align: center;
   font-size: 12px;
-  color: #7B61FF;
-  text-decoration: none;
-  margin-bottom: 16px;
-  transition: opacity 0.2s;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 10px;
 }
 
-.customize-link:hover {
-  opacity: 0.8;
-  text-decoration: underline;
+.test-btn:hover {
+  background: rgba(123, 97, 255, 0.1);
+  border-color: rgba(123, 97, 255, 0.25);
+  color: rgba(255, 255, 255, 0.7);
 }
+
+/* ── Links ────────────────────────────────────────────────────────── */
+
+.link {
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(123, 97, 255, 0.7);
+  text-decoration: none;
+  margin-bottom: 14px;
+  transition: color 0.15s;
+}
+
+.link:hover {
+  color: #7B61FF;
+}
+
+/* ── Coffee button ────────────────────────────────────────────────── */
 
 .coffee-btn {
   display: block;
   width: 100%;
-  padding: 10px;
+  padding: 11px;
   text-align: center;
   background: linear-gradient(135deg, #7B61FF, #E040FB);
   color: #fff;
   text-decoration: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  transition: opacity 0.2s;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  transition: opacity 0.15s;
 }
 
 .coffee-btn:hover {
-  opacity: 0.9;
+  opacity: 0.88;
 }

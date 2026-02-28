@@ -3,26 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
   <title>TabFlip</title>
 </head>
 <body>
   <div class="popup">
-    <div class="logo">
-      <img src="icons/icon48.png" alt="TabFlip" width="32" height="32">
-      <h1>TabFlip</h1>
+    <div class="header">
+      <div class="logo-mark">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7B61FF"/>
+              <stop offset="1" stop-color="#E040FB"/>
+            </linearGradient>
+          </defs>
+          <rect width="36" height="36" rx="10" fill="url(#g1)"/>
+          <path d="M10 14h16M10 18h10M10 22h13" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="wordmark">TabFlip</span>
     </div>
+
     <p class="shortcut" id="shortcut-text"></p>
+
+    <div class="divider"></div>
+
     <div class="hints">
-      <div class="hint"><kbd id="mod-key">Option</kbd> + <kbd>Q</kbd> tap &rarr; switch to last tab</div>
-      <div class="hint"><kbd>Q</kbd> while held &rarr; move right</div>
-      <div class="hint"><kbd>Shift</kbd> + <kbd>Q</kbd> while held &rarr; move left</div>
-      <div class="hint">Release <kbd id="mod-key-2">Option</kbd> &rarr; confirm switch</div>
-      <div class="hint"><kbd>Esc</kbd> &rarr; cancel</div>
+      <div class="hint-row">
+        <span class="keys"><kbd id="k-mod">Option</kbd> <kbd>Q</kbd></span>
+        <span class="hint-label">switch to last tab</span>
+      </div>
+      <div class="hint-row">
+        <span class="keys"><kbd>Q</kbd> <kbd>Q</kbd> <kbd>Q</kbd></span>
+        <span class="hint-label">cycle right while held</span>
+      </div>
+      <div class="hint-row">
+        <span class="keys"><kbd>Shift</kbd> <kbd>Q</kbd></span>
+        <span class="hint-label">cycle left while held</span>
+      </div>
+      <div class="hint-row">
+        <span class="keys">release <kbd id="k-mod2">Option</kbd></span>
+        <span class="hint-label">confirm switch</span>
+      </div>
     </div>
-    <a href="#" id="customize-link" class="customize-link">Customize shortcut</a>
+
+    <div class="divider"></div>
+
+    <button id="test-btn" class="test-btn">Test switcher on active tab</button>
+
+    <a href="#" id="customize-link" class="link">Customize shortcut</a>
     <a href="https://buymeacoffee.com/tabflip" target="_blank" class="coffee-btn">
-      ☕ Buy me a coffee
+      Buy me a coffee
     </a>
   </div>
   <script src="popup-init.js"></script>
