@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TabFlip — Chrome Web Store Banner</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1280px;
+    height: 800px;
+    background: #1a1a1a;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+
+  /* ── Logo + heading ─────────────────────────────────── */
+
+  .top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 120px;
+    gap: 12px;
+  }
+
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #7B61FF, #E040FB);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  /* Two overlapping rounded rects to suggest tab cards */
+  .logo-icon::before,
+  .logo-icon::after {
+    content: "";
+    position: absolute;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.95);
+  }
+  .logo-icon::before {
+    width: 22px;
+    height: 28px;
+    top: 10px;
+    left: 10px;
+  }
+  .logo-icon::after {
+    width: 22px;
+    height: 28px;
+    top: 14px;
+    left: 20px;
+    background: rgba(255, 255, 255, 0.55);
+  }
+
+  .logo-text {
+    font-size: 48px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -1.5px;
+  }
+
+  .subtitle {
+    font-size: 16px;
+    font-weight: 400;
+    color: #888888;
+    letter-spacing: 0.2px;
+  }
+
+  /* ── Switcher bar ───────────────────────────────────── */
+
+  .switcher {
+    margin-top: 56px;
+    background: #2a2a2a;
+    border-radius: 16px;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* ── Card ────────────────────────────────────────────── */
+
+  .card {
+    width: 160px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0.6;
+    transform: scale(1);
+    flex-shrink: 0;
+  }
+
+  .card.selected {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+
+  .card-screen-wrap {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 2px solid transparent;
+  }
+
+  .card.selected .card-screen-wrap {
+    border: 2px solid transparent;
+    background-image: linear-gradient(#2a2a2a, #2a2a2a), linear-gradient(135deg, #7B61FF, #E040FB);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+    box-shadow: 0 4px 24px rgba(123, 97, 255, 0.25), 0 2px 12px rgba(224, 64, 251, 0.12);
+  }
+
+  .card-screen {
+    width: 100%;
+    height: 110px;
+    background: #1e1e1e;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Fake browser chrome bar */
+  .card-screen .bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 16px;
+    background: #252525;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    gap: 3px;
+  }
+
+  .card-screen .bar .dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #444;
+  }
+
+  .card-screen .bar .url-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: #333;
+    margin-left: 6px;
+    flex: 1;
+  }
+
+  /* Fake page content lines */
+  .card-screen .content-lines {
+    position: absolute;
+    top: 24px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .card-screen .line {
+    height: 4px;
+    border-radius: 2px;
+    background: #2a2a2a;
+  }
+
+  /* Page-specific color accents */
+  .card-screen .accent-block {
+    position: absolute;
+    border-radius: 4px;
+  }
+
+  .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 2px;
+  }
+
+  .card-favicon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 8px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .card-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+  }
+
+  .card:not(.selected) .card-title {
+    color: #cccccc;
+  }
+
+  .card-domain {
+    font-size: 11px;
+    font-weight: 400;
+    color: #666666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+  }
+
+  /* ── Shortcut hint ──────────────────────────────────── */
+
+  .hint {
+    margin-top: 28px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #666666;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Bottom right ───────────────────────────────────── */
+
+  .bottom-right {
+    position: absolute;
+    bottom: 28px;
+    right: 40px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #888888;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top: Logo + subtitle -->
+  <div class="top">
+    <div class="logo-row">
+      <div class="logo-icon"></div>
+      <span class="logo-text">TabFlip</span>
+    </div>
+    <span class="subtitle">arc style tab switching for chrome</span>
+  </div>
+
+  <!-- Switcher bar -->
+  <div class="switcher">
+
+    <!-- Card 1: Google -->
+    <div class="card">
+      <div class="card-screen-wrap">
+        <div class="card-screen">
+          <div class="bar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar"></div></div>
+          <div class="content-lines">
+            <div class="accent-block" style="width: 50px; height: 14px; background: #4285F4; top: 0; position: relative; margin-bottom: 8px; border-radius: 3px;"></div>
+            <div class="line" style="width: 80%;"></div>
+            <div class="line" style="width: 50%;"></div>
+            <div class="line" style="width: 65%;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="card-favicon" style="background: #4285F4;">G</div>
+        <div class="card-text">
+          <span class="card-title">Google Search</span>
+          <span class="card-domain">google.com</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 2: GitHub -->
+    <div class="card">
+      <div class="card-screen-wrap">
+        <div class="card-screen" style="background: #0d1117;">
+          <div class="bar" style="background: #161b22;"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar" style="background: #21262d;"></div></div>
+          <div class="content-lines" style="top: 22px;">
+            <div class="line" style="width: 40%; background: #58a6ff; height: 5px;"></div>
+            <div class="line" style="width: 90%; background: #161b22;"></div>
+            <div class="line" style="width: 75%; background: #161b22;"></div>
+            <div class="line" style="width: 85%; background: #161b22;"></div>
+            <div class="line" style="width: 60%; background: #161b22;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="card-favicon" style="background: #24292e;">
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </div>
+        <div class="card-text">
+          <span class="card-title">GitHub</span>
+          <span class="card-domain">github.com</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: Figma (SELECTED) -->
+    <div class="card selected">
+      <div class="card-screen-wrap">
+        <div class="card-screen" style="background: #1e1e1e;">
+          <div class="bar" style="background: #2c2c2c;"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar" style="background: #3a3a3a;"></div></div>
+          <!-- Figma-style canvas with shapes -->
+          <div class="accent-block" style="width: 30px; height: 30px; background: #A259FF; top: 28px; left: 14px; border-radius: 6px;"></div>
+          <div class="accent-block" style="width: 45px; height: 20px; background: #0ACF83; top: 34px; left: 54px; border-radius: 4px;"></div>
+          <div class="accent-block" style="width: 24px; height: 24px; background: #FF7262; top: 64px; left: 24px; border-radius: 50%;"></div>
+          <div class="accent-block" style="width: 50px; height: 14px; background: #1ABCFE; top: 68px; left: 60px; border-radius: 3px;"></div>
+          <!-- Sidebar hint -->
+          <div style="position: absolute; left: 0; top: 16px; bottom: 0; width: 8px; background: #252525;"></div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="card-favicon" style="background: #1e1e1e; border: 1px solid #333;">
+          <svg width="8" height="12" viewBox="0 0 38 57" fill="none"><path d="M19 28.5a9.5 9.5 0 100-19H9.5a9.5 9.5 0 000 19H19z" fill="#A259FF"/><path d="M9.5 47.5a9.5 9.5 0 009.5-9.5V28.5H9.5a9.5 9.5 0 000 19z" fill="#0ACF83"/><path d="M19 0H9.5a9.5 9.5 0 000 19H19V0z" fill="#F24E1E"/><path d="M19 0h9.5a9.5 9.5 0 010 19H19V0z" fill="#FF7262"/><path d="M28.5 28.5a9.5 9.5 0 010-19H19v19h9.5z" fill="#1ABCFE"/></svg>
+        </div>
+        <div class="card-text">
+          <span class="card-title">Figma - UI Design</span>
+          <span class="card-domain">figma.com</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 4: Notion -->
+    <div class="card">
+      <div class="card-screen-wrap">
+        <div class="card-screen" style="background: #191919;">
+          <div class="bar" style="background: #202020;"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar" style="background: #2a2a2a;"></div></div>
+          <div class="content-lines" style="top: 24px; left: 16px; right: 16px;">
+            <div class="line" style="width: 55%; background: #ccc; height: 6px; margin-bottom: 4px;"></div>
+            <div class="line" style="width: 90%; background: #2a2a2a;"></div>
+            <div class="line" style="width: 80%; background: #2a2a2a;"></div>
+            <div class="line" style="width: 70%; background: #2a2a2a;"></div>
+            <div class="line" style="width: 85%; background: #2a2a2a;"></div>
+          </div>
+          <!-- Sidebar -->
+          <div style="position: absolute; left: 0; top: 16px; bottom: 0; width: 10px; background: #1f1f1f;"></div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="card-favicon" style="background: #fff;">
+          <span style="color: #000; font-size: 9px; font-weight: 800;">N</span>
+        </div>
+        <div class="card-text">
+          <span class="card-title">Notion</span>
+          <span class="card-domain">notion.so</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 5: YouTube -->
+    <div class="card">
+      <div class="card-screen-wrap">
+        <div class="card-screen" style="background: #0f0f0f;">
+          <div class="bar" style="background: #181818;"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url-bar" style="background: #222;"></div></div>
+          <!-- Video player area -->
+          <div class="accent-block" style="width: 130px; height: 52px; background: #1a1a1a; top: 22px; left: 10px; border-radius: 4px;"></div>
+          <!-- Play button triangle -->
+          <div style="position: absolute; top: 38px; left: 64px; width: 0; height: 0; border-left: 12px solid rgba(255,255,255,0.8); border-top: 7px solid transparent; border-bottom: 7px solid transparent;"></div>
+          <!-- Red bar -->
+          <div class="accent-block" style="width: 50px; height: 3px; background: #FF0000; top: 76px; left: 10px;"></div>
+          <div class="accent-block" style="width: 80px; height: 3px; background: #333; top: 76px; left: 60px;"></div>
+          <!-- Sidebar suggestions -->
+          <div class="content-lines" style="top: 84px; left: 10px; right: 10px;">
+            <div class="line" style="width: 70%; background: #1a1a1a;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-meta">
+        <div class="card-favicon" style="background: #FF0000;">
+          <svg width="8" height="8" viewBox="0 0 16 16" fill="white"><path d="M6.5 4.5v7l5.5-3.5z"/></svg>
+        </div>
+        <div class="card-text">
+          <span class="card-title">YouTube</span>
+          <span class="card-domain">youtube.com</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Shortcut hint -->
+  <div class="hint">&#x2325; + Q to switch tabs</div>
+
+  <!-- Bottom right -->
+  <div class="bottom-right">free for chrome</div>
+
+</body>
+</html>
