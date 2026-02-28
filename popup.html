@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>TabFlip</title>
+</head>
+<body>
+  <div class="popup">
+    <div class="logo">
+      <img src="icons/icon48.png" alt="TabFlip" width="32" height="32">
+      <h1>TabFlip</h1>
+    </div>
+    <p class="shortcut" id="shortcut-text"></p>
+    <div class="hints">
+      <div class="hint"><kbd id="mod-key">Option</kbd> + <kbd>Q</kbd> tap &rarr; switch to last tab</div>
+      <div class="hint"><kbd>Q</kbd> while held &rarr; move right</div>
+      <div class="hint"><kbd>Shift</kbd> + <kbd>Q</kbd> while held &rarr; move left</div>
+      <div class="hint">Release <kbd id="mod-key-2">Option</kbd> &rarr; confirm switch</div>
+      <div class="hint"><kbd>Esc</kbd> &rarr; cancel</div>
+    </div>
+    <a href="#" id="customize-link" class="customize-link">Customize shortcut</a>
+    <a href="https://buymeacoffee.com/tabflip" target="_blank" class="coffee-btn">
+      ☕ Buy me a coffee
+    </a>
+  </div>
+  <script src="popup-init.js"></script>
+</body>
+</html>

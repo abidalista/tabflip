@@ -1,0 +1,155 @@
+/* TabFlip — overlay styles */
+
+#tabflip-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#tabflip-overlay.tabflip-overlay--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#tabflip-container {
+  background: #2a2a2a;
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+#tabflip-cards {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ── Card ─────────────────────────────────────────────────────────── */
+
+.tabflip-card {
+  width: 200px;
+  background: #1e1e1e;
+  border-radius: 12px;
+  border: 2px solid #3a3a3a;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+  flex-shrink: 0;
+}
+
+.tabflip-card--selected {
+  transform: scale(1.05);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  box-shadow:
+    0 0 0 2px #7B61FF,
+    0 0 20px rgba(123, 97, 255, 0.4),
+    0 0 40px rgba(224, 64, 251, 0.2),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+  /* Gradient border via outline trick — using box-shadow instead for cleaner look */
+}
+
+/* Gradient glow ring for selected card */
+.tabflip-card--selected::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #7B61FF, #E040FB);
+  z-index: -1;
+}
+
+/* Need relative positioning for the pseudo-element */
+.tabflip-card--selected {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Screenshot area ──────────────────────────────────────────────── */
+
+.tabflip-card__screenshot {
+  width: 200px;
+  height: 140px;
+  overflow: hidden;
+  background: #151515;
+  position: relative;
+}
+
+.tabflip-card__screenshot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tabflip-card__screenshot--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabflip-card__placeholder {
+  font-size: 36px;
+  font-weight: 700;
+  color: #555;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+}
+
+/* ── Meta (favicon + title) ───────────────────────────────────────── */
+
+.tabflip-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.tabflip-card__favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tabflip-card__title {
+  font-size: 11px;
+  font-weight: 500;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.3;
+}
+
+.tabflip-card--selected .tabflip-card__title {
+  color: #fff;
+}
+
+/* ── Unselected cards: dimmer ─────────────────────────────────────── */
+
+.tabflip-card:not(.tabflip-card--selected) {
+  opacity: 0.75;
+  transform: scale(0.95);
+}
+
+.tabflip-card:not(.tabflip-card--selected):hover {
+  opacity: 0.9;
+  border-color: #555;
+}

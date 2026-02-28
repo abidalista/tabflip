@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \":*)",
+      "Read(//Users/abidal.eth/Desktop/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/abidal.eth/Desktop"
+    ]
+  }
+}
