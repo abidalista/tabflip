@@ -19,19 +19,31 @@
     document.documentElement.appendChild(overlayEl);
   }
 
-  function showOverlay() {
+  function showSwitcher(tabData) {
+    tabs = tabData;
+    selectedIndex = 1; // pre-select previous tab
     if (!overlayEl) createOverlay();
     renderCards();
-    // Force reflow so the transition plays
-    overlayEl.offsetHeight;
+    overlayEl.offsetHeight; // force reflow
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
-    console.log("[TabFlip] overlay shown with", tabs.length, "tabs, selected:", selectedIndex);
   }
 
-  function hideOverlay() {
+  function hideSwitcher() {
     if (overlayEl) overlayEl.classList.remove("tabflip-overlay--visible");
     overlayVisible = false;
+  }
+
+  function cycleForward() {
+    selectedIndex = (selectedIndex + 1) % tabs.length;
+    renderCards();
+  }
+
+  function switchToSelected() {
+    if (selectedIndex >= 0 && selectedIndex < tabs.length) {
+      chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
+    }
+    hideSwitcher();
   }
 
   function renderCards() {
@@ -110,55 +122,48 @@
     }
   }
 
-  function switchToSelected() {
-    if (selectedIndex >= 0 && selectedIndex < tabs.length) {
-      console.log("[TabFlip] switching to tab:", tabs[selectedIndex].title);
-      chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
-    }
-    hideOverlay();
-  }
+  // ── Messages from background.js ────────────────────────────────────
 
-  // ── Message from background (command triggered) ─────────────────────
-
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "cycleTab" && msg.tabs) {
-      console.log("[TabFlip] received cycleTab message with", msg.tabs.length, "tabs");
-
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "toggleSwitcher" && msg.tabs) {
       if (!overlayVisible) {
-        // First press: show overlay, select the 2nd tab (previous one)
-        tabs = msg.tabs;
-        selectedIndex = 1;
-        showOverlay();
+        showSwitcher(msg.tabs);
       } else {
-        // Subsequent presses: cycle forward
-        selectedIndex = (selectedIndex + 1) % tabs.length;
-        console.log("[TabFlip] cycling to index:", selectedIndex);
-        renderCards();
+        cycleForward();
       }
+      sendResponse({ ok: true });
+    }
+    if (msg.type === "ping") {
+      sendResponse({ ok: true });
     }
   });
 
-  // ── Keyboard (only for Alt release + Escape) ───────────────────────
+  // ── Keyboard: Ctrl/Cmd release = switch, Escape = cancel ──────────
 
   document.addEventListener("keyup", (e) => {
-    if ((e.key === "Alt" || e.key === "Meta") && overlayVisible) {
-      console.log("[TabFlip] Alt released, switching");
+    if (!overlayVisible) return;
+    // When the modifier key is released, switch to selected tab
+    if (e.key === "Control" || e.key === "Meta") {
+      e.preventDefault();
       switchToSelected();
     }
   }, true);
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && overlayVisible) {
+    if (!overlayVisible) return;
+    // Escape closes without switching
+    if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      console.log("[TabFlip] Escape pressed, hiding overlay");
-      hideOverlay();
+      hideSwitcher();
+    }
+    // Prevent Ctrl+Q / Cmd+Q from propagating (would quit browser)
+    if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
+      e.preventDefault();
     }
   }, true);
 
   window.addEventListener("blur", () => {
-    if (overlayVisible) hideOverlay();
+    if (overlayVisible) hideSwitcher();
   });
-
-  console.log("[TabFlip] content script loaded");
 })();

@@ -5,6 +5,7 @@ const MAX_SCREENSHOTS = 20;
 
 let mruStacks = {};    // { windowId: [tabId, ...] }
 let screenshots = {};  // { tabId: dataUrl }
+let switcherVisible = false; // prevent screenshot capture while switcher is open
 
 // ── Persistence (survives service worker restarts) ──────────────────
 
@@ -44,9 +45,9 @@ function removeTab(tid) {
 }
 
 async function captureScreenshot(wid, tid) {
+  if (switcherVisible) return; // don't capture while overlay is shown
   try {
     screenshots[tid] = await chrome.tabs.captureVisibleTab(wid, { format: "jpeg", quality: 50 });
-    // Prune if over limit
     const keys = Object.keys(screenshots);
     if (keys.length > MAX_SCREENSHOTS) {
       const keep = new Set(Object.values(mruStacks).flat());
@@ -60,7 +61,6 @@ async function captureScreenshot(wid, tid) {
 
 async function seedMRU() {
   const allTabs = await chrome.tabs.query({});
-  // Group tabs by window
   const byWindow = {};
   for (const tab of allTabs) {
     if (!byWindow[tab.windowId]) byWindow[tab.windowId] = { active: null, others: [] };
@@ -69,7 +69,6 @@ async function seedMRU() {
   }
   for (const [wid, group] of Object.entries(byWindow)) {
     const s = getStack(Number(wid));
-    // Only seed if stack is empty (don't overwrite real MRU order)
     if (s.length > 0) continue;
     if (group.active) s.push(group.active);
     for (const id of group.others) s.push(id);
@@ -79,12 +78,73 @@ async function seedMRU() {
   console.log("[TabFlip] seeded MRU:", JSON.stringify(mruStacks));
 }
 
+// ── Ensure content script is injected ────────────────────────────────
+
+async function ensureContentScript(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "ping" });
+    return true;
+  } catch (_) {
+    try {
+      await chrome.scripting.insertCSS({ target: { tabId }, files: ["styles.css"] });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+// ── Build MRU tab list ──────────────────────────────────────────────
+
+async function buildTabList(wid) {
+  if (Object.keys(mruStacks).length === 0) await loadMRU();
+  if (getStack(wid).length === 0) await seedMRU();
+
+  const result = [];
+  for (const id of getStack(wid)) {
+    try {
+      const t = await chrome.tabs.get(id);
+      result.push({
+        id: t.id,
+        title: t.title || "Untitled",
+        url: t.url || "",
+        favIconUrl: t.favIconUrl || "",
+        screenshot: screenshots[t.id] || null
+      });
+    } catch (_) { removeTab(id); }
+  }
+  return result;
+}
+
+// ── Toggle tab switcher ─────────────────────────────────────────────
+
+async function toggleTabSwitcher() {
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!activeTab || !activeTab.url || !/^https?:\/\//.test(activeTab.url)) return;
+
+  const tabs = await buildTabList(activeTab.windowId);
+  if (tabs.length < 2) return;
+
+  const injected = await ensureContentScript(activeTab.id);
+  if (!injected) return;
+
+  try {
+    await chrome.tabs.sendMessage(activeTab.id, { type: "toggleSwitcher", tabs });
+    switcherVisible = true;
+    console.log("[TabFlip] toggleSwitcher sent,", tabs.length, "tabs");
+  } catch (e) {
+    console.log("[TabFlip] failed to send toggleSwitcher:", e.message);
+  }
+}
+
 // ── Tab events ───────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   pushTab(windowId, tabId);
   saveMRU();
-  setTimeout(() => captureScreenshot(windowId, tabId), 400);
+  switcherVisible = false;
+  setTimeout(() => captureScreenshot(windowId, tabId), 800);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -92,7 +152,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   saveMRU();
 });
 
-// Only capture screenshot on complete — do NOT push to MRU on page updates
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "complete") {
     setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
@@ -109,7 +168,6 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
   await seedMRU();
-  // Re-inject content script into existing http(s) tabs
   const allTabs = await chrome.tabs.query({});
   for (const tab of allTabs) {
     if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
@@ -118,91 +176,24 @@ chrome.runtime.onInstalled.addListener(async () => {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
     } catch (_) {}
   }
-  console.log("[TabFlip] content scripts injected into existing tabs");
+  console.log("[TabFlip] installed, content scripts injected");
 });
 
-// ── Command handler (Alt+Q) ──────────────────────────────────────────
+// ── Command handler (Ctrl+Q / Cmd+Q) ────────────────────────────────
 
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== "cycle-tab") return;
-
-  // Restore state if worker restarted
-  if (Object.keys(mruStacks).length === 0) await loadMRU();
-
-  // Get active tab to know which window and which tab to send message to
-  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab) return;
-
-  const wid = activeTab.windowId;
-  if (getStack(wid).length === 0) await seedMRU();
-
-  // Build tab list with metadata
-  const result = [];
-  for (const id of getStack(wid)) {
-    try {
-      const t = await chrome.tabs.get(id);
-      result.push({
-        id: t.id,
-        title: t.title || "Untitled",
-        url: t.url || "",
-        favIconUrl: t.favIconUrl || "",
-        screenshot: screenshots[t.id] || null
-      });
-    } catch (_) { removeTab(id); }
+  if (command === "cycle-tab") {
+    await toggleTabSwitcher();
   }
-
-  if (result.length < 2) return;
-
-  // Send to the active tab's content script
-  try {
-    await chrome.tabs.sendMessage(activeTab.id, { type: "cycleTab", tabs: result });
-  } catch (_) {
-    // Content script not injected — inject it and retry
-    try {
-      await chrome.scripting.insertCSS({ target: { tabId: activeTab.id }, files: ["styles.css"] });
-      await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ["content.js"] });
-      await chrome.tabs.sendMessage(activeTab.id, { type: "cycleTab", tabs: result });
-    } catch (_) {}
-  }
-  console.log("[TabFlip] cycle-tab command sent", result.length, "tabs to tab", activeTab.id);
 });
 
 // ── Messaging ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "getMRU") {
-    (async () => {
-      // Restore state if worker restarted
-      if (Object.keys(mruStacks).length === 0) await loadMRU();
-
-      const wid = msg.windowId || (sender.tab && sender.tab.windowId);
-      if (!wid) { sendResponse({ tabs: [] }); return; }
-
-      // Seed if still empty after loading
-      if (getStack(wid).length === 0) await seedMRU();
-
-      const result = [];
-      for (const id of getStack(wid)) {
-        try {
-          const t = await chrome.tabs.get(id);
-          result.push({
-            id: t.id,
-            title: t.title || "Untitled",
-            url: t.url || "",
-            favIconUrl: t.favIconUrl || "",
-            screenshot: screenshots[t.id] || null
-          });
-        } catch (_) { removeTab(id); }
-      }
-      console.log("[TabFlip] getMRU returning", result.length, "tabs for window", wid);
-      sendResponse({ tabs: result });
-    })();
-    return true; // async
-  }
-
   if (msg.type === "switchTab") {
     try {
       chrome.tabs.update(msg.tabId, { active: true });
+      switcherVisible = false;
     } catch (_) {}
     sendResponse({ ok: true });
   }
