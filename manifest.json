@@ -3,7 +3,7 @@
   "name": "TabFlip",
   "version": "1.0.1",
   "version_name": "1.0.1",
-  "description": "Arc-style MRU tab switcher. Hold Ctrl + press Q to cycle your most recent tabs with visual previews. Release to switch.",
+  "description": "Arc-style MRU tab switcher. Hold Ctrl+Q to cycle your most recent tabs with visual previews. Release to switch.",
   "homepage_url": "https://buymeacoffee.com/abidalista",
   "permissions": [
     "tabs",
@@ -44,7 +44,7 @@
     "cycle-tab": {
       "suggested_key": {
         "default": "Ctrl+Q",
-        "mac": "Command+Q"
+        "mac": "MacCtrl+Q"
       },
       "description": "Cycle through recent tabs"
     }
