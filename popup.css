@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -7,43 +8,61 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.popup {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
+.popup { padding: 20px; }
 
 .name {
+  display: block;
   font-size: 18px;
   font-weight: 700;
   color: #fff;
+  margin-bottom: 14px;
+}
+
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .shortcut-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
 }
 
-.pill {
+.keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
   background: #2a2a2a;
   border: 1px solid #333;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
+  border-radius: 5px;
+  color: #ccc;
 }
 
 .label {
-  font-size: 13px;
-  color: #888;
+  font-size: 12px;
+  color: #555;
 }
 
 .divider {
   height: 1px;
   background: #2a2a2a;
+  margin-bottom: 14px;
 }
 
 .coffee {
