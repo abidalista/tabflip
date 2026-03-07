@@ -179,9 +179,17 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log("[TabFlip] installed, content scripts injected");
 });
 
-// ── Command handler (Ctrl+Q / Cmd+Q) ────────────────────────────────
+// ── Icon click handler ───────────────────────────────────────────────
+
+chrome.action.onClicked.addListener(async () => {
+  console.log("[TabFlip] icon clicked");
+  await toggleTabSwitcher();
+});
+
+// ── Command handler (Ctrl+Q) ────────────────────────────────────────
 
 chrome.commands.onCommand.addListener(async (command) => {
+  console.log("[TabFlip] command received:", command);
   if (command === "cycle-tab") {
     await toggleTabSwitcher();
   }
