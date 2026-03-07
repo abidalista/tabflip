@@ -121,6 +121,52 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log("[TabFlip] content scripts injected into existing tabs");
 });
 
+// ── Command handler (Alt+Q) ──────────────────────────────────────────
+
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== "cycle-tab") return;
+
+  // Restore state if worker restarted
+  if (Object.keys(mruStacks).length === 0) await loadMRU();
+
+  // Get active tab to know which window and which tab to send message to
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!activeTab) return;
+
+  const wid = activeTab.windowId;
+  if (getStack(wid).length === 0) await seedMRU();
+
+  // Build tab list with metadata
+  const result = [];
+  for (const id of getStack(wid)) {
+    try {
+      const t = await chrome.tabs.get(id);
+      result.push({
+        id: t.id,
+        title: t.title || "Untitled",
+        url: t.url || "",
+        favIconUrl: t.favIconUrl || "",
+        screenshot: screenshots[t.id] || null
+      });
+    } catch (_) { removeTab(id); }
+  }
+
+  if (result.length < 2) return;
+
+  // Send to the active tab's content script
+  try {
+    await chrome.tabs.sendMessage(activeTab.id, { type: "cycleTab", tabs: result });
+  } catch (_) {
+    // Content script not injected — inject it and retry
+    try {
+      await chrome.scripting.insertCSS({ target: { tabId: activeTab.id }, files: ["styles.css"] });
+      await chrome.scripting.executeScript({ target: { tabId: activeTab.id }, files: ["content.js"] });
+      await chrome.tabs.sendMessage(activeTab.id, { type: "cycleTab", tabs: result });
+    } catch (_) {}
+  }
+  console.log("[TabFlip] cycle-tab command sent", result.length, "tabs to tab", activeTab.id);
+});
+
 // ── Messaging ────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

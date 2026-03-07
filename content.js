@@ -9,7 +9,6 @@
   let tabs = [];
   let selectedIndex = 0;
   let overlayVisible = false;
-  let mruReady = false;
 
   // ── DOM ──────────────────────────────────────────────────────────────
 
@@ -17,20 +16,22 @@
     overlayEl = document.createElement("div");
     overlayEl.id = "tabflip-overlay";
     overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
-    document.body.appendChild(overlayEl);
+    document.documentElement.appendChild(overlayEl);
   }
 
   function showOverlay() {
     if (!overlayEl) createOverlay();
     renderCards();
+    // Force reflow so the transition plays
+    overlayEl.offsetHeight;
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
+    console.log("[TabFlip] overlay shown with", tabs.length, "tabs, selected:", selectedIndex);
   }
 
   function hideOverlay() {
     if (overlayEl) overlayEl.classList.remove("tabflip-overlay--visible");
     overlayVisible = false;
-    mruReady = false;
   }
 
   function renderCards() {
@@ -53,6 +54,7 @@
       if (tab.screenshot) {
         const img = document.createElement("img");
         img.src = tab.screenshot;
+        img.alt = tab.title || "";
         img.draggable = false;
         shot.appendChild(img);
       } else {
@@ -108,78 +110,49 @@
     }
   }
 
-  // ── Messaging ────────────────────────────────────────────────────────
-
-  function prefetchMRU() {
-    // Fire-and-forget: pre-load MRU data so it's ready when Q is pressed
-    chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
-      if (chrome.runtime.lastError) return; // extension context dead
-      tabs = (res && res.tabs) ? res.tabs : [];
-      mruReady = true;
-    });
-  }
-
   function switchToSelected() {
     if (selectedIndex >= 0 && selectedIndex < tabs.length) {
+      console.log("[TabFlip] switching to tab:", tabs[selectedIndex].title);
       chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
     }
     hideOverlay();
   }
 
-  // ── Keyboard ─────────────────────────────────────────────────────────
+  // ── Message from background (command triggered) ─────────────────────
 
-  document.addEventListener("keydown", (e) => {
-    // When Alt/Option is pressed alone, pre-fetch MRU immediately
-    if (e.key === "Alt") {
-      prefetchMRU();
-      return;
-    }
-
-    // Escape: close overlay
-    if (e.key === "Escape" && overlayVisible) {
-      e.preventDefault();
-      e.stopPropagation();
-      hideOverlay();
-      return;
-    }
-
-    // Alt/Option + Q
-    if (e.altKey && (e.code === "KeyQ" || e.key === "q" || e.key === "Q")) {
-      e.preventDefault();  // stops œ on Mac
-      e.stopPropagation();
-
-      // If MRU wasn't pre-fetched yet (e.g. rapid press), fetch now
-      if (!mruReady) {
-        chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
-          if (chrome.runtime.lastError) return;
-          tabs = (res && res.tabs) ? res.tabs : [];
-          mruReady = true;
-          if (tabs.length >= 2) {
-            selectedIndex = e.shiftKey ? tabs.length - 1 : 1;
-            showOverlay();
-          }
-        });
-        return;
-      }
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "cycleTab" && msg.tabs) {
+      console.log("[TabFlip] received cycleTab message with", msg.tabs.length, "tabs");
 
       if (!overlayVisible) {
-        // First Q press: show overlay (data already loaded from prefetch)
-        if (tabs.length < 2) return;
-        selectedIndex = e.shiftKey ? tabs.length - 1 : 1;
+        // First press: show overlay, select the 2nd tab (previous one)
+        tabs = msg.tabs;
+        selectedIndex = 1;
         showOverlay();
       } else {
-        // Subsequent Q presses: advance selection
-        const delta = e.shiftKey ? -1 : 1;
-        selectedIndex = (selectedIndex + delta + tabs.length) % tabs.length;
+        // Subsequent presses: cycle forward
+        selectedIndex = (selectedIndex + 1) % tabs.length;
+        console.log("[TabFlip] cycling to index:", selectedIndex);
         renderCards();
       }
     }
+  });
+
+  // ── Keyboard (only for Alt release + Escape) ───────────────────────
+
+  document.addEventListener("keyup", (e) => {
+    if ((e.key === "Alt" || e.key === "Meta") && overlayVisible) {
+      console.log("[TabFlip] Alt released, switching");
+      switchToSelected();
+    }
   }, true);
 
-  // Alt/Option released: commit switch
-  document.addEventListener("keyup", (e) => {
-    if (e.key === "Alt" && overlayVisible) {
-      switchToSelected();
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && overlayVisible) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log("[TabFlip] Escape pressed, hiding overlay");
+      hideOverlay();
     }
   }, true);
 
@@ -187,16 +160,5 @@
     if (overlayVisible) hideOverlay();
   });
 
-  // Message listener for programmatic trigger
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "showOverlay") {
-      chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
-        if (chrome.runtime.lastError) return;
-        tabs = (res && res.tabs) ? res.tabs : [];
-        if (tabs.length < 1) return;
-        selectedIndex = Math.min(1, tabs.length - 1);
-        showOverlay();
-      });
-    }
-  });
+  console.log("[TabFlip] content script loaded");
 })();
