@@ -1,9 +1,23 @@
 // TabFlip — background service worker
 
-const mruStacks = {};   // { windowId: [tabId, ...] }
-const screenshots = {}; // { tabId: dataUrl }
-const MAX_MRU = 5;
+const MAX_MRU = 10;
 const MAX_SCREENSHOTS = 20;
+
+let mruStacks = {};    // { windowId: [tabId, ...] }
+let screenshots = {};  // { tabId: dataUrl }
+
+// ── Persistence (survives service worker restarts) ──────────────────
+
+async function saveMRU() {
+  try { await chrome.storage.session.set({ mruStacks }); } catch (_) {}
+}
+
+async function loadMRU() {
+  try {
+    const data = await chrome.storage.session.get("mruStacks");
+    if (data.mruStacks) mruStacks = data.mruStacks;
+  } catch (_) {}
+}
 
 // ── MRU helpers ──────────────────────────────────────────────────────
 
@@ -46,14 +60,22 @@ async function captureScreenshot(wid, tid) {
 
 async function seedMRU() {
   const allTabs = await chrome.tabs.query({});
+  // Group tabs by window
+  const byWindow = {};
   for (const tab of allTabs) {
-    const s = getStack(tab.windowId);
-    if (tab.active) s.unshift(tab.id);
-    else s.push(tab.id);
+    if (!byWindow[tab.windowId]) byWindow[tab.windowId] = { active: null, others: [] };
+    if (tab.active) byWindow[tab.windowId].active = tab.id;
+    else byWindow[tab.windowId].others.push(tab.id);
   }
-  for (const wid of Object.keys(mruStacks)) {
-    if (mruStacks[wid].length > MAX_MRU) mruStacks[wid].length = MAX_MRU;
+  for (const [wid, group] of Object.entries(byWindow)) {
+    const s = getStack(Number(wid));
+    // Only seed if stack is empty (don't overwrite real MRU order)
+    if (s.length > 0) continue;
+    if (group.active) s.push(group.active);
+    for (const id of group.others) s.push(id);
+    if (s.length > MAX_MRU) s.length = MAX_MRU;
   }
+  await saveMRU();
   console.log("[TabFlip] seeded MRU:", JSON.stringify(mruStacks));
 }
 
@@ -61,26 +83,33 @@ async function seedMRU() {
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   pushTab(windowId, tabId);
+  saveMRU();
   setTimeout(() => captureScreenshot(windowId, tabId), 400);
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => removeTab(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  removeTab(tabId);
+  saveMRU();
+});
 
+// Only capture screenshot on complete — do NOT push to MRU on page updates
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === "complete" || info.title || info.url) {
-    pushTab(tab.windowId, tabId);
-    if (info.status === "complete") setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
+  if (info.status === "complete") {
+    setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
   }
 });
 
 // ── Startup / Install ────────────────────────────────────────────────
 
-chrome.runtime.onStartup.addListener(() => seedMRU());
+chrome.runtime.onStartup.addListener(async () => {
+  await loadMRU();
+  await seedMRU();
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await loadMRU();
   await seedMRU();
-  // Re-inject content script into existing http(s) tabs so the extension
-  // works immediately without the user having to refresh each tab.
+  // Re-inject content script into existing http(s) tabs
   const allTabs = await chrome.tabs.query({});
   for (const tab of allTabs) {
     if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
@@ -97,10 +126,15 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "getMRU") {
     (async () => {
+      // Restore state if worker restarted
+      if (Object.keys(mruStacks).length === 0) await loadMRU();
+
       const wid = msg.windowId || (sender.tab && sender.tab.windowId);
       if (!wid) { sendResponse({ tabs: [] }); return; }
-      // Re-seed if worker restarted and lost state
+
+      // Seed if still empty after loading
       if (getStack(wid).length === 0) await seedMRU();
+
       const result = [];
       for (const id of getStack(wid)) {
         try {
@@ -121,7 +155,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "switchTab") {
-    chrome.tabs.update(msg.tabId, { active: true });
+    try {
+      chrome.tabs.update(msg.tabId, { active: true });
+    } catch (_) {}
     sendResponse({ ok: true });
   }
 });

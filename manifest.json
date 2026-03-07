@@ -3,12 +3,13 @@
   "name": "TabFlip",
   "version": "1.0.0",
   "version_name": "1.0.0",
-  "description": "Arc-style MRU tab switcher. Hold Option + press Q to cycle your 5 most recent tabs with visual previews. Release to switch.",
-  "homepage_url": "https://buymeacoffee.com/tabflip",
+  "description": "Arc-style MRU tab switcher. Hold Option + press Q to cycle your most recent tabs with visual previews. Release to switch.",
+  "homepage_url": "https://buymeacoffee.com/abidalista",
   "permissions": [
     "tabs",
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"
