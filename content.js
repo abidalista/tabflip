@@ -1,36 +1,14 @@
 // TabFlip — content script
 
 (() => {
-  // Clean up overlay from previous injection (extension reload)
+  // Clean up from previous injection
   const old = document.getElementById("tabflip-overlay");
   if (old) old.remove();
-  const oldDebug = document.getElementById("tabflip-debug");
-  if (oldDebug) oldDebug.remove();
 
   let overlayEl = null;
   let tabs = [];
   let selectedIndex = 0;
   let overlayVisible = false;
-
-  // ── DEBUG: visible toast on page ───────────────────────────────────
-
-  function debugToast(msg) {
-    let box = document.getElementById("tabflip-debug");
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "tabflip-debug";
-      box.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2147483647;background:#1a1a1a;color:#0f0;font:13px/1.5 monospace;padding:12px 16px;border-radius:8px;border:1px solid #333;max-width:400px;pointer-events:none;";
-      document.documentElement.appendChild(box);
-    }
-    const line = document.createElement("div");
-    line.textContent = "[TabFlip] " + msg;
-    box.appendChild(line);
-    // Auto-hide after 10s
-    clearTimeout(box._timer);
-    box._timer = setTimeout(() => box.remove(), 10000);
-  }
-
-  debugToast("content script loaded OK");
 
   // ── DOM ──────────────────────────────────────────────────────────────
 
@@ -39,37 +17,37 @@
     overlayEl.id = "tabflip-overlay";
     overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
     document.documentElement.appendChild(overlayEl);
-    debugToast("overlay DOM created");
   }
 
   function showSwitcher(tabData) {
     tabs = tabData;
-    selectedIndex = 1;
+    selectedIndex = 1; // pre-select previous tab
     if (!overlayEl) createOverlay();
     renderCards();
     overlayEl.offsetHeight; // force reflow
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
-    debugToast("overlay shown with " + tabs.length + " tabs");
   }
 
-  function hideSwitcher() {
+  function hideSwitcher(notify) {
     if (overlayEl) overlayEl.classList.remove("tabflip-overlay--visible");
     overlayVisible = false;
+    if (notify) {
+      try { chrome.runtime.sendMessage({ type: "switcherClosed" }); } catch (_) {}
+    }
   }
 
   function cycleForward() {
+    if (!overlayVisible || tabs.length < 2) return;
     selectedIndex = (selectedIndex + 1) % tabs.length;
     renderCards();
-    debugToast("cycled to index " + selectedIndex);
   }
 
   function switchToSelected() {
     if (selectedIndex >= 0 && selectedIndex < tabs.length) {
-      debugToast("switching to: " + tabs[selectedIndex].title);
       chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
     }
-    hideSwitcher();
+    hideSwitcher(false); // background already knows via switchTab
   }
 
   function renderCards() {
@@ -148,17 +126,15 @@
     }
   }
 
-  // ── Messages from background.js ────────────────────────────────────
+  // ── Messages from background ───────────────────────────────────────
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    debugToast("message received: " + msg.type);
-    if (msg.type === "toggleSwitcher" && msg.tabs) {
-      debugToast("got " + msg.tabs.length + " tabs");
-      if (!overlayVisible) {
-        showSwitcher(msg.tabs);
-      } else {
-        cycleForward();
-      }
+    if (msg.type === "showSwitcher" && msg.tabs) {
+      showSwitcher(msg.tabs);
+      sendResponse({ ok: true });
+    }
+    if (msg.type === "cycle") {
+      cycleForward();
       sendResponse({ ok: true });
     }
     if (msg.type === "ping") {
@@ -166,7 +142,7 @@
     }
   });
 
-  // ── Keyboard: Ctrl/Cmd release = switch, Escape = cancel ──────────
+  // ── Keyboard: Ctrl release = switch, Escape = cancel ──────────────
 
   document.addEventListener("keyup", (e) => {
     if (!overlayVisible) return;
@@ -181,14 +157,13 @@
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      hideSwitcher();
+      hideSwitcher(true);
     }
+    // Prevent Ctrl+Q from propagating while overlay is open
     if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
       e.preventDefault();
     }
   }, true);
 
-  window.addEventListener("blur", () => {
-    if (overlayVisible) hideSwitcher();
-  });
+  // NOTE: No window.blur handler — it was killing the overlay
 })();

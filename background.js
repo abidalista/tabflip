@@ -119,7 +119,20 @@ async function buildTabList(wid) {
 
 // ── Toggle tab switcher ─────────────────────────────────────────────
 
+let activeTabId = null; // track which tab has the switcher open
+
 async function toggleTabSwitcher() {
+  // If switcher is already open, just send cycle (fast, no async tab lookups)
+  if (switcherVisible && activeTabId) {
+    try {
+      await chrome.tabs.sendMessage(activeTabId, { type: "cycle" });
+      console.log("[TabFlip] cycle sent");
+    } catch (_) {
+      switcherVisible = false;
+    }
+    return;
+  }
+
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!activeTab || !activeTab.url || !/^https?:\/\//.test(activeTab.url)) return;
 
@@ -130,11 +143,12 @@ async function toggleTabSwitcher() {
   if (!injected) return;
 
   try {
-    await chrome.tabs.sendMessage(activeTab.id, { type: "toggleSwitcher", tabs });
+    await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
     switcherVisible = true;
-    console.log("[TabFlip] toggleSwitcher sent,", tabs.length, "tabs");
+    activeTabId = activeTab.id;
+    console.log("[TabFlip] showSwitcher sent,", tabs.length, "tabs");
   } catch (e) {
-    console.log("[TabFlip] failed to send toggleSwitcher:", e.message);
+    console.log("[TabFlip] failed to send showSwitcher:", e.message);
   }
 }
 
@@ -201,8 +215,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "switchTab") {
     try {
       chrome.tabs.update(msg.tabId, { active: true });
-      switcherVisible = false;
     } catch (_) {}
+    switcherVisible = false;
+    activeTabId = null;
+    sendResponse({ ok: true });
+  }
+  if (msg.type === "switcherClosed") {
+    switcherVisible = false;
+    activeTabId = null;
     sendResponse({ ok: true });
   }
 });
