@@ -1,4 +1,4 @@
-// TabFlip — content script
+// TabFlip — content script (overlay on page)
 
 (() => {
   // Clean up from previous injection
@@ -16,15 +16,15 @@
     overlayEl = document.createElement("div");
     overlayEl.id = "tabflip-overlay";
     overlayEl.innerHTML = '<div id="tabflip-container"><div id="tabflip-cards"></div></div>';
-    document.documentElement.appendChild(overlayEl);
+    (document.body || document.documentElement).appendChild(overlayEl);
   }
 
   function showSwitcher(tabData) {
     tabs = tabData;
-    selectedIndex = 1; // pre-select previous tab
+    selectedIndex = 1;
     if (!overlayEl) createOverlay();
     renderCards();
-    overlayEl.offsetHeight; // force reflow
+    overlayEl.offsetHeight;
     overlayEl.classList.add("tabflip-overlay--visible");
     overlayVisible = true;
   }
@@ -47,7 +47,7 @@
     if (selectedIndex >= 0 && selectedIndex < tabs.length) {
       chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
     }
-    hideSwitcher(false); // background already knows via switchTab
+    hideSwitcher(false);
   }
 
   function renderCards() {
@@ -159,11 +159,10 @@
       e.stopPropagation();
       hideSwitcher(true);
     }
-    // Prevent Ctrl+Q from propagating while overlay is open
     if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
       e.preventDefault();
     }
   }, true);
 
-  // NOTE: No window.blur handler — it was killing the overlay
+  // NO blur handler — it was killing the overlay
 })();
