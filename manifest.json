@@ -3,7 +3,7 @@
   "name": "TabFlip",
   "version": "1.1.1",
   "version_name": "1.1.1",
-  "description": "Arc-style MRU tab switcher. Ctrl+Q to cycle your most recent tabs with visual previews.",
+  "description": "Arc-style tab switcher. Ctrl+Q to cycle your recent tabs with visual previews. Release to switch.",
   "homepage_url": "https://buymeacoffee.com/abidalista",
   "permissions": [
     "tabs",
