@@ -231,6 +231,10 @@
       cycleForward();
       sendResponse({ ok: true });
     }
+    if (msg.type === "hide") {
+      hideSwitcher(false);
+      sendResponse({ ok: true });
+    }
     if (msg.type === "ping") {
       sendResponse({ ok: true });
     }

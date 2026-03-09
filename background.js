@@ -160,8 +160,11 @@ async function openFallbackSwitcher(windowId) {
 // ── Handle Ctrl+Q command ───────────────────────────────────────────
 
 async function handleCommand() {
-  // If overlay switcher is already open, just cycle
-  if (switcherOpen && switcherTabId) {
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!activeTab) return;
+
+  // If overlay is open on THIS tab, just cycle
+  if (switcherOpen && switcherTabId === activeTab.id) {
     try {
       await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
       return;
@@ -171,8 +174,14 @@ async function handleCommand() {
     }
   }
 
-  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab) return;
+  // If overlay was open on a DIFFERENT tab, close it and start fresh
+  if (switcherOpen && switcherTabId && switcherTabId !== activeTab.id) {
+    try {
+      chrome.tabs.sendMessage(switcherTabId, { type: "hide" });
+    } catch (_) {}
+    switcherOpen = false;
+    switcherTabId = null;
+  }
 
   // If on a page where content scripts can't run, use fallback popup window
   const canInject = activeTab.url && /^https?:\/\//.test(activeTab.url);
@@ -201,6 +210,14 @@ async function handleCommand() {
 // ── Tab events ──────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  // If switcher was open on a different tab, close it there
+  if (switcherOpen && switcherTabId && switcherTabId !== tabId) {
+    try {
+      chrome.tabs.sendMessage(switcherTabId, { type: "hide" });
+    } catch (_) {}
+    switcherOpen = false;
+    switcherTabId = null;
+  }
   pushTab(windowId, tabId);
   saveMRU();
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
