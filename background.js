@@ -83,14 +83,16 @@ async function seedMRU() {
 
 async function buildTabList(wid) {
   if (Object.keys(mruStacks).length === 0) await loadMRU();
-  if (getStack(wid).length === 0) await seedMRU();
+  if (getStack(wid).length < 2) await seedMRU();
 
   const stack = getStack(wid).slice(0, 5);
   const results = await Promise.allSettled(stack.map(id => chrome.tabs.get(id)));
   const out = [];
+  const seen = new Set();
   for (let i = 0; i < results.length; i++) {
     if (results[i].status === "fulfilled") {
       const t = results[i].value;
+      seen.add(t.id);
       out.push({
         id: t.id,
         title: t.title || "Untitled",
@@ -102,6 +104,26 @@ async function buildTabList(wid) {
       removeTab(stack[i]);
     }
   }
+
+  // If MRU didn't have enough tabs, fill from the current window
+  if (out.length < 2) {
+    const windowTabs = await chrome.tabs.query({ windowId: wid });
+    for (const t of windowTabs) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      pushTab(wid, t.id);
+      out.push({
+        id: t.id,
+        title: t.title || "Untitled",
+        url: t.url || "",
+        favIconUrl: t.favIconUrl || "",
+        screenshot: screenshots[t.id] || null
+      });
+      if (out.length >= 5) break;
+    }
+    saveMRU();
+  }
+
   return out;
 }
 
@@ -181,6 +203,13 @@ async function handleCommand() {
     } catch (_) {}
     switcherOpen = false;
     switcherTabId = null;
+  }
+
+  // Capture current tab screenshot if we don't have one (service worker may have restarted)
+  if (!screenshots[activeTab.id]) {
+    try {
+      screenshots[activeTab.id] = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: "jpeg", quality: 50 });
+    } catch (_) {}
   }
 
   // If on a page where content scripts can't run, use fallback popup window
