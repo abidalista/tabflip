@@ -45,7 +45,7 @@
 
   function switchToSelected() {
     if (selectedIndex >= 0 && selectedIndex < tabs.length) {
-      chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
+      try { chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id }); } catch (_) {}
     }
     hideSwitcher(false);
   }
