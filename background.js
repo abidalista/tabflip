@@ -1,4 +1,4 @@
-// TabFlip — background service worker (overlay approach)
+// TabFlip — background service worker (bulletproof edition)
 
 const MAX_MRU = 5;
 const MAX_SCREENSHOTS = 20;
@@ -7,7 +7,8 @@ let mruStacks = {};
 let screenshots = {};
 let switcherOpen = false;
 let switcherTabId = null;
-let switcherWindowId = null; // fallback popup window for chrome:// pages
+let switcherWindowId = null;
+let commandLock = false; // prevent race conditions
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -20,6 +21,14 @@ async function loadMRU() {
     const data = await chrome.storage.session.get("mruStacks");
     if (data.mruStacks) mruStacks = data.mruStacks;
   } catch (_) {}
+}
+
+// ── Ensure state is loaded (call at every entry point) ──────────────
+
+async function ensureState() {
+  if (Object.keys(mruStacks).length === 0) {
+    await loadMRU();
+  }
 }
 
 // ── MRU helpers ─────────────────────────────────────────────────────
@@ -61,37 +70,22 @@ async function captureScreenshot(wid, tid) {
   } catch (_) {}
 }
 
-async function seedMRU() {
-  const allTabs = await chrome.tabs.query({});
-  const byWindow = {};
-  for (const tab of allTabs) {
-    if (!byWindow[tab.windowId]) byWindow[tab.windowId] = { active: null, others: [] };
-    if (tab.active) byWindow[tab.windowId].active = tab.id;
-    else byWindow[tab.windowId].others.push(tab.id);
-  }
-  for (const [wid, group] of Object.entries(byWindow)) {
-    const s = getStack(Number(wid));
-    if (s.length > 0) continue;
-    if (group.active) s.push(group.active);
-    for (const id of group.others) s.push(id);
-    if (s.length > MAX_MRU) s.length = MAX_MRU;
-  }
-  await saveMRU();
-}
-
-// ── Build tab list (parallel fetch, max 5) ──────────────────────────
+// ── Build tab list — ALWAYS returns tabs if the window has them ─────
 
 async function buildTabList(wid) {
-  if (Object.keys(mruStacks).length === 0) await loadMRU();
-  if (getStack(wid).length < 2) await seedMRU();
+  await ensureState();
 
+  // Step 1: try MRU stack
   const stack = getStack(wid).slice(0, 5);
   const results = await Promise.allSettled(stack.map(id => chrome.tabs.get(id)));
   const out = [];
   const seen = new Set();
+
   for (let i = 0; i < results.length; i++) {
     if (results[i].status === "fulfilled") {
       const t = results[i].value;
+      // Only include tabs from this window (stale cross-window IDs)
+      if (t.windowId !== wid) { removeTab(stack[i]); continue; }
       seen.add(t.id);
       out.push({
         id: t.id,
@@ -105,10 +99,15 @@ async function buildTabList(wid) {
     }
   }
 
-  // If MRU didn't have enough tabs, fill from the current window
-  if (out.length < 2) {
+  // Step 2: if MRU didn't give us enough, query the actual window tabs
+  if (out.length < 5) {
     const windowTabs = await chrome.tabs.query({ windowId: wid });
-    for (const t of windowTabs) {
+    // Put active tab first if it's not already in the list
+    const active = windowTabs.find(t => t.active);
+    const others = windowTabs.filter(t => !t.active);
+    const ordered = active ? [active, ...others] : others;
+
+    for (const t of ordered) {
       if (seen.has(t.id)) continue;
       seen.add(t.id);
       pushTab(wid, t.id);
@@ -127,24 +126,20 @@ async function buildTabList(wid) {
   return out;
 }
 
-// ── Ensure content script is injected ───────────────────────────────
+// ── Ensure content script (with re-injection for stale contexts) ────
 
 async function ensureContentScript(tabId) {
+  // Always re-inject to avoid stale context from extension reload
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "ping" });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    await new Promise(r => setTimeout(r, 50));
     return true;
   } catch (_) {
-    try {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-      await new Promise(r => setTimeout(r, 50));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return false;
   }
 }
 
-// ── Fallback: popup window for pages where content scripts can't run ─
+// ── Fallback: popup window for restricted pages ─────────────────────
 
 async function openFallbackSwitcher(windowId) {
   if (switcherWindowId) {
@@ -166,93 +161,127 @@ async function openFallbackSwitcher(windowId) {
   const width = Math.min(tabs.length * (cardWidth + gap) + padding, 1200);
   const height = 240;
 
-  const currentWindow = await chrome.windows.get(windowId);
-  const left = Math.round(currentWindow.left + (currentWindow.width - width) / 2);
-  const top = Math.round(currentWindow.top + (currentWindow.height - height) / 2);
+  try {
+    const currentWindow = await chrome.windows.get(windowId);
+    const left = Math.round(currentWindow.left + (currentWindow.width - width) / 2);
+    const top = Math.round(currentWindow.top + (currentWindow.height - height) / 2);
 
-  const win = await chrome.windows.create({
-    url: "switcher.html",
-    type: "popup",
-    width, height, left, top,
-    focused: true
-  });
-  switcherWindowId = win.id;
+    const win = await chrome.windows.create({
+      url: "switcher.html",
+      type: "popup",
+      width, height, left, top,
+      focused: true
+    });
+    switcherWindowId = win.id;
+  } catch (_) {
+    // Last resort: open without positioning
+    try {
+      const win = await chrome.windows.create({
+        url: "switcher.html",
+        type: "popup",
+        width, height,
+        focused: true
+      });
+      switcherWindowId = win.id;
+    } catch (_) {}
+  }
 }
 
-// ── Handle Ctrl+Q command ───────────────────────────────────────────
+// ── Handle Ctrl+Q command (the main entry point) ────────────────────
 
 async function handleCommand() {
-  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab) return;
+  // Prevent overlapping calls from rapid key presses
+  if (commandLock) return;
+  commandLock = true;
 
-  // If overlay is open on THIS tab, just cycle
-  if (switcherOpen && switcherTabId === activeTab.id) {
-    try {
-      await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
-      return;
-    } catch (_) {
+  try {
+    await ensureState();
+
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!activeTab) return;
+
+    // If overlay is open on THIS tab, just cycle
+    if (switcherOpen && switcherTabId === activeTab.id) {
+      try {
+        const response = await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
+        if (response && response.ok) return;
+      } catch (_) {}
+      // Cycle failed — overlay is dead, reset and reopen
       switcherOpen = false;
       switcherTabId = null;
     }
-  }
 
-  // If overlay was open on a DIFFERENT tab, close it and start fresh
-  if (switcherOpen && switcherTabId && switcherTabId !== activeTab.id) {
+    // If overlay was open on a DIFFERENT tab, close it
+    if (switcherOpen && switcherTabId && switcherTabId !== activeTab.id) {
+      try { chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); } catch (_) {}
+      switcherOpen = false;
+      switcherTabId = null;
+    }
+
+    // Capture current tab screenshot if missing
+    if (!screenshots[activeTab.id]) {
+      try {
+        screenshots[activeTab.id] = await chrome.tabs.captureVisibleTab(
+          activeTab.windowId, { format: "jpeg", quality: 50 }
+        );
+      } catch (_) {}
+    }
+
+    // Can we inject a content script on this page?
+    const canInject = activeTab.url && /^https?:\/\//.test(activeTab.url);
+
+    if (!canInject) {
+      await openFallbackSwitcher(activeTab.windowId);
+      return;
+    }
+
+    const tabs = await buildTabList(activeTab.windowId);
+    if (tabs.length < 2) return; // genuinely only 1 tab in the window
+
+    // Inject content script (always re-inject to handle stale contexts)
+    const ok = await ensureContentScript(activeTab.id);
+    if (!ok) {
+      await openFallbackSwitcher(activeTab.windowId);
+      return;
+    }
+
+    // Send the tab list to the overlay
     try {
-      chrome.tabs.sendMessage(switcherTabId, { type: "hide" });
+      const response = await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
+      if (response && response.ok) {
+        switcherOpen = true;
+        switcherTabId = activeTab.id;
+        return;
+      }
     } catch (_) {}
-    switcherOpen = false;
-    switcherTabId = null;
-  }
 
-  // Capture current tab screenshot if we don't have one (service worker may have restarted)
-  if (!screenshots[activeTab.id]) {
-    try {
-      screenshots[activeTab.id] = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: "jpeg", quality: 50 });
-    } catch (_) {}
-  }
-
-  // If on a page where content scripts can't run, use fallback popup window
-  const canInject = activeTab.url && /^https?:\/\//.test(activeTab.url);
-  if (!canInject) {
+    // If sendMessage failed, fall back to popup window
     await openFallbackSwitcher(activeTab.windowId);
-    return;
+
+  } finally {
+    commandLock = false;
   }
-
-  const tabs = await buildTabList(activeTab.windowId);
-  if (tabs.length < 2) return;
-
-  const ok = await ensureContentScript(activeTab.id);
-  if (!ok) {
-    // Content script injection failed — use fallback
-    await openFallbackSwitcher(activeTab.windowId);
-    return;
-  }
-
-  try {
-    await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
-    switcherOpen = true;
-    switcherTabId = activeTab.id;
-  } catch (_) {}
 }
 
 // ── Tab events ──────────────────────────────────────────────────────
 
-chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
-  // If switcher was open on a different tab, close it there
+chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  await ensureState();
+
+  // Close overlay on the old tab
   if (switcherOpen && switcherTabId && switcherTabId !== tabId) {
-    try {
-      chrome.tabs.sendMessage(switcherTabId, { type: "hide" });
-    } catch (_) {}
+    try { chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); } catch (_) {}
     switcherOpen = false;
     switcherTabId = null;
   }
+
   pushTab(windowId, tabId);
   saveMRU();
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  await ensureState();
   removeTab(tabId);
   saveMRU();
 });
@@ -274,20 +303,21 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await loadMRU();
-  await seedMRU();
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
-  await seedMRU();
-  // Inject content script into existing tabs
+  // Pre-inject content script into all http tabs
   const allTabs = await chrome.tabs.query({});
   for (const tab of allTabs) {
     if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
     try {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
     } catch (_) {}
+    // Seed MRU with all tabs
+    pushTab(tab.windowId, tab.id);
   }
+  await saveMRU();
 });
 
 // ── Command (Ctrl+Q) ───────────────────────────────────────────────
@@ -303,6 +333,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "getMRU") {
     (async () => {
+      await ensureState();
       const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
       if (!activeTab) { sendResponse({ tabs: [] }); return; }
       let wid = activeTab.windowId;
@@ -330,6 +361,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switcherWindowId = null;
     sendResponse({ ok: true });
   }
+
   if (msg.type === "switcherClosed") {
     switcherOpen = false;
     switcherTabId = null;
