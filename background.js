@@ -3,10 +3,9 @@
 const MAX_MRU = 10;
 const MAX_SCREENSHOTS = 20;
 
-let mruStacks = {};
-let screenshots = {};
-let switcherOpen = false;
-let switcherTabId = null;
+let mruStacks = {};    // { windowId: [tabId, ...] }
+let screenshots = {};  // { tabId: dataUrl }
+let switcherWindowId = null;
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -46,7 +45,7 @@ function removeTab(tid) {
 }
 
 async function captureScreenshot(wid, tid) {
-  if (switcherOpen) return;
+  if (switcherWindowId) return;
   try {
     screenshots[tid] = await chrome.tabs.captureVisibleTab(wid, { format: "jpeg", quality: 50 });
     const keys = Object.keys(screenshots);
@@ -76,7 +75,10 @@ async function seedMRU() {
     if (s.length > MAX_MRU) s.length = MAX_MRU;
   }
   await saveMRU();
+  console.log("[TabFlip] seeded MRU:", JSON.stringify(mruStacks));
 }
+
+// ── Build tab list ──────────────────────────────────────────────────
 
 async function buildTabList(wid) {
   if (Object.keys(mruStacks).length === 0) await loadMRU();
@@ -98,58 +100,57 @@ async function buildTabList(wid) {
   return result;
 }
 
-// ── Ensure content script ───────────────────────────────────────────
+// ── Open switcher popup window ──────────────────────────────────────
 
-async function ensureContentScript(tabId) {
-  try {
-    await chrome.tabs.sendMessage(tabId, { type: "ping" });
-    return true;
-  } catch (_) {
+async function openSwitcher() {
+  // If already open, just cycle (the popup handles its own keyboard)
+  if (switcherWindowId) {
     try {
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-      // Small delay for script to initialize
-      await new Promise(r => setTimeout(r, 50));
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-}
-
-// ── Handle Ctrl+Q command ───────────────────────────────────────────
-
-async function handleCommand() {
-  // If switcher is already open, just cycle
-  if (switcherOpen && switcherTabId) {
-    try {
-      await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
+      await chrome.windows.get(switcherWindowId);
+      // Window exists — focus it, it will handle Ctrl+Q internally
+      await chrome.windows.update(switcherWindowId, { focused: true });
       return;
     } catch (_) {
-      switcherOpen = false;
-      switcherTabId = null;
+      switcherWindowId = null;
     }
   }
 
-  // First press: open switcher
+  // Calculate window size based on tab count
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab || !activeTab.url || !/^https?:\/\//.test(activeTab.url)) return;
+  if (!activeTab) return;
 
   const tabs = await buildTabList(activeTab.windowId);
   if (tabs.length < 2) return;
 
-  const ok = await ensureContentScript(activeTab.id);
-  if (!ok) return;
+  const cardWidth = 180;
+  const gap = 16;
+  const padding = 48;
+  const width = Math.min(tabs.length * (cardWidth + gap) + padding, 1200);
+  const height = 240;
 
-  try {
-    await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
-    switcherOpen = true;
-    switcherTabId = activeTab.id;
-  } catch (_) {}
+  // Get the current window to center the popup
+  const currentWindow = await chrome.windows.get(activeTab.windowId);
+  const left = Math.round(currentWindow.left + (currentWindow.width - width) / 2);
+  const top = Math.round(currentWindow.top + (currentWindow.height - height) / 2);
+
+  const win = await chrome.windows.create({
+    url: "switcher.html",
+    type: "popup",
+    width,
+    height,
+    left,
+    top,
+    focused: true
+  });
+
+  switcherWindowId = win.id;
 }
 
 // ── Tab events ──────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  // Don't track the switcher window itself
+  if (windowId === switcherWindowId) return;
   pushTab(windowId, tabId);
   saveMRU();
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
@@ -161,8 +162,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === "complete") {
+  if (info.status === "complete" && tab.windowId !== switcherWindowId) {
     setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
+  }
+});
+
+// Clean up when switcher window is closed
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === switcherWindowId) {
+    switcherWindowId = null;
   }
 });
 
@@ -176,38 +184,48 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
   await seedMRU();
-  // Inject into existing tabs
-  const allTabs = await chrome.tabs.query({});
-  for (const tab of allTabs) {
-    if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
-    try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-    } catch (_) {}
-  }
+  console.log("[TabFlip] installed");
 });
 
-// ── Command (Ctrl+Q) ───────────────────────────────────────────────
+// ── Command handler (Ctrl+Q) ────────────────────────────────────────
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "cycle-tab") {
-    await handleCommand();
+    await openSwitcher();
   }
 });
 
 // ── Messaging ───────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "getMRU") {
+    (async () => {
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!activeTab) { sendResponse({ tabs: [] }); return; }
+      // Use the parent window, not the switcher popup
+      let wid = activeTab.windowId;
+      if (wid === switcherWindowId) {
+        // Find the last focused non-popup window
+        const allWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+        if (allWindows.length > 0) wid = allWindows[0].id;
+      }
+      const tabs = await buildTabList(wid);
+      sendResponse({ tabs });
+    })();
+    return true;
+  }
+
   if (msg.type === "switchTab") {
     try {
       chrome.tabs.update(msg.tabId, { active: true });
+      // Focus the window containing the tab
+      chrome.tabs.get(msg.tabId, (tab) => {
+        if (tab && tab.windowId) {
+          chrome.windows.update(tab.windowId, { focused: true });
+        }
+      });
     } catch (_) {}
-    switcherOpen = false;
-    switcherTabId = null;
-    sendResponse({ ok: true });
-  }
-  if (msg.type === "switcherClosed") {
-    switcherOpen = false;
-    switcherTabId = null;
+    switcherWindowId = null;
     sendResponse({ ok: true });
   }
 });
