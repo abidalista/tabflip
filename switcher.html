@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: rgba(15, 15, 35, 0.95);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 24px;
+    }
+    #cards {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 160px;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+      flex-shrink: 0;
+      opacity: 0.45;
+      transform: scale(0.92);
+    }
+    .card:hover { opacity: 0.7; transform: scale(0.97); }
+    .card.selected {
+      width: 200px;
+      opacity: 1;
+      transform: scale(1.08);
+      z-index: 10;
+    }
+    .screenshot-wrap {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .card.selected .screenshot-wrap {
+      padding: 3px;
+      background: linear-gradient(135deg, #7B61FF, #d946ef, #E040FB);
+      border: none;
+      border-radius: 13px;
+      box-shadow: 0 0 30px rgba(123,97,255,0.4), 0 0 60px rgba(224,64,251,0.15);
+    }
+    .screenshot {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #1a1a2e;
+      overflow: hidden;
+      position: relative;
+    }
+    .card.selected .screenshot { border-radius: 10px; }
+    .screenshot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .screenshot.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1a2e, #252545);
+    }
+    .placeholder {
+      font-size: 28px;
+      font-weight: 800;
+      color: rgba(255,255,255,0.15);
+      user-select: none;
+    }
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 2px;
+      min-width: 0;
+    }
+    .favicon-wrap {
+      width: 20px; height: 20px;
+      background: #1e1e2e;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .card.selected .favicon-wrap {
+      border-color: rgba(123,97,255,0.35);
+    }
+    .favicon { width: 12px; height: 12px; border-radius: 2px; }
+    .favicon-letter { font-size: 10px; font-weight: 700; color: #888; }
+    .card.selected .favicon-letter { color: #7B61FF; }
+    .text { display: flex; flex-direction: column; min-width: 0; }
+    .title {
+      font-size: 11px; font-weight: 600; color: #c8c8d8;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;
+    }
+    .card.selected .title { color: #fff; font-size: 12px; }
+    .url {
+      font-size: 9px; font-weight: 400; color: #666680;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;
+    }
+    .card.selected .url { color: #8888a8; }
+    .hint {
+      position: fixed;
+      bottom: 12px;
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 11px;
+      color: #555;
+    }
+    .hint kbd {
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 10px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div id="cards"></div>
+  <div class="hint">
+    <kbd>Ctrl</kbd>+<kbd>Q</kbd> cycle &middot; release <kbd>Ctrl</kbd> to switch &middot; <kbd>Esc</kbd> cancel
+  </div>
+  <script src="switcher.js"></script>
+</body>
+</html>

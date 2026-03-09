@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "TabFlip",
-  "version": "1.0.1",
-  "version_name": "1.0.1",
-  "description": "Arc-style MRU tab switcher. Hold Ctrl+Q to cycle your most recent tabs with visual previews. Release to switch.",
+  "version": "1.1.0",
+  "version_name": "1.1.0",
+  "description": "Arc-style MRU tab switcher. Ctrl+Q to cycle your most recent tabs with visual previews.",
   "homepage_url": "https://buymeacoffee.com/abidalista",
   "permissions": [
     "tabs",
@@ -18,16 +18,8 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["styles.css"],
-      "run_at": "document_end",
-      "all_frames": false
-    }
-  ],
   "action": {
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
