@@ -1,6 +1,6 @@
 // TabFlip — background service worker
 
-const MAX_MRU = 10;
+const MAX_MRU = 5;
 const MAX_SCREENSHOTS = 20;
 
 let mruStacks = {};    // { windowId: [tabId, ...] }
@@ -84,10 +84,12 @@ async function buildTabList(wid) {
   if (Object.keys(mruStacks).length === 0) await loadMRU();
   if (getStack(wid).length === 0) await seedMRU();
 
+  const stack = getStack(wid).slice(0, 5);
+  const results = await Promise.allSettled(stack.map(id => chrome.tabs.get(id)));
   const result = [];
-  for (const id of getStack(wid)) {
-    try {
-      const t = await chrome.tabs.get(id);
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].status === "fulfilled") {
+      const t = results[i].value;
       result.push({
         id: t.id,
         title: t.title || "Untitled",
@@ -95,7 +97,9 @@ async function buildTabList(wid) {
         favIconUrl: t.favIconUrl || "",
         screenshot: screenshots[t.id] || null
       });
-    } catch (_) { removeTab(id); }
+    } else {
+      removeTab(stack[i]);
+    }
   }
   return result;
 }
@@ -122,10 +126,11 @@ async function openSwitcher() {
   const tabs = await buildTabList(activeTab.windowId);
   if (tabs.length < 2) return;
 
+  const displayTabs = tabs.slice(0, 5);
   const cardWidth = 180;
   const gap = 16;
   const padding = 48;
-  const width = Math.min(tabs.length * (cardWidth + gap) + padding, 1200);
+  const width = Math.min(displayTabs.length * (cardWidth + gap) + padding, 1200);
   const height = 240;
 
   // Get the current window to center the popup
