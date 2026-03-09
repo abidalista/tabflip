@@ -1,11 +1,12 @@
-// TabFlip — background service worker
+// TabFlip — background service worker (overlay approach)
 
 const MAX_MRU = 5;
 const MAX_SCREENSHOTS = 20;
 
-let mruStacks = {};    // { windowId: [tabId, ...] }
-let screenshots = {};  // { tabId: dataUrl }
-let switcherWindowId = null;
+let mruStacks = {};
+let screenshots = {};
+let switcherOpen = false;
+let switcherTabId = null;
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ function removeTab(tid) {
 }
 
 async function captureScreenshot(wid, tid) {
-  if (switcherWindowId) return;
+  if (switcherOpen) return;
   try {
     screenshots[tid] = await chrome.tabs.captureVisibleTab(wid, { format: "jpeg", quality: 50 });
     const keys = Object.keys(screenshots);
@@ -75,10 +76,9 @@ async function seedMRU() {
     if (s.length > MAX_MRU) s.length = MAX_MRU;
   }
   await saveMRU();
-  console.log("[TabFlip] seeded MRU:", JSON.stringify(mruStacks));
 }
 
-// ── Build tab list ──────────────────────────────────────────────────
+// ── Build tab list (parallel fetch, max 5) ──────────────────────────
 
 async function buildTabList(wid) {
   if (Object.keys(mruStacks).length === 0) await loadMRU();
@@ -86,11 +86,11 @@ async function buildTabList(wid) {
 
   const stack = getStack(wid).slice(0, 5);
   const results = await Promise.allSettled(stack.map(id => chrome.tabs.get(id)));
-  const result = [];
+  const out = [];
   for (let i = 0; i < results.length; i++) {
     if (results[i].status === "fulfilled") {
       const t = results[i].value;
-      result.push({
+      out.push({
         id: t.id,
         title: t.title || "Untitled",
         url: t.url || "",
@@ -101,61 +101,60 @@ async function buildTabList(wid) {
       removeTab(stack[i]);
     }
   }
-  return result;
+  return out;
 }
 
-// ── Open switcher popup window ──────────────────────────────────────
+// ── Ensure content script is injected ───────────────────────────────
 
-async function openSwitcher() {
-  // If already open, just cycle (the popup handles its own keyboard)
-  if (switcherWindowId) {
+async function ensureContentScript(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "ping" });
+    return true;
+  } catch (_) {
     try {
-      await chrome.windows.get(switcherWindowId);
-      // Window exists — focus it, it will handle Ctrl+Q internally
-      await chrome.windows.update(switcherWindowId, { focused: true });
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+      await new Promise(r => setTimeout(r, 50));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+// ── Handle Ctrl+Q command ───────────────────────────────────────────
+
+async function handleCommand() {
+  // If switcher is already open, just cycle
+  if (switcherOpen && switcherTabId) {
+    try {
+      await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
       return;
     } catch (_) {
-      switcherWindowId = null;
+      switcherOpen = false;
+      switcherTabId = null;
     }
   }
 
-  // Calculate window size based on tab count
+  // First press: open switcher
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab) return;
+  if (!activeTab || !activeTab.url || !/^https?:\/\//.test(activeTab.url)) return;
 
   const tabs = await buildTabList(activeTab.windowId);
   if (tabs.length < 2) return;
 
-  const displayTabs = tabs.slice(0, 5);
-  const cardWidth = 180;
-  const gap = 16;
-  const padding = 48;
-  const width = Math.min(displayTabs.length * (cardWidth + gap) + padding, 1200);
-  const height = 240;
+  const ok = await ensureContentScript(activeTab.id);
+  if (!ok) return;
 
-  // Get the current window to center the popup
-  const currentWindow = await chrome.windows.get(activeTab.windowId);
-  const left = Math.round(currentWindow.left + (currentWindow.width - width) / 2);
-  const top = Math.round(currentWindow.top + (currentWindow.height - height) / 2);
-
-  const win = await chrome.windows.create({
-    url: "switcher.html",
-    type: "popup",
-    width,
-    height,
-    left,
-    top,
-    focused: true
-  });
-
-  switcherWindowId = win.id;
+  try {
+    await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
+    switcherOpen = true;
+    switcherTabId = activeTab.id;
+  } catch (_) {}
 }
 
 // ── Tab events ──────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
-  // Don't track the switcher window itself
-  if (windowId === switcherWindowId) return;
   pushTab(windowId, tabId);
   saveMRU();
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
@@ -167,15 +166,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === "complete" && tab.windowId !== switcherWindowId) {
+  if (info.status === "complete") {
     setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
-  }
-});
-
-// Clean up when switcher window is closed
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === switcherWindowId) {
-    switcherWindowId = null;
   }
 });
 
@@ -189,48 +181,38 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
   await seedMRU();
-  console.log("[TabFlip] installed");
+  // Inject content script into existing tabs
+  const allTabs = await chrome.tabs.query({});
+  for (const tab of allTabs) {
+    if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    } catch (_) {}
+  }
 });
 
-// ── Command handler (Ctrl+Q) ────────────────────────────────────────
+// ── Command (Ctrl+Q) ───────────────────────────────────────────────
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "cycle-tab") {
-    await openSwitcher();
+    await handleCommand();
   }
 });
 
 // ── Messaging ───────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "getMRU") {
-    (async () => {
-      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (!activeTab) { sendResponse({ tabs: [] }); return; }
-      // Use the parent window, not the switcher popup
-      let wid = activeTab.windowId;
-      if (wid === switcherWindowId) {
-        // Find the last focused non-popup window
-        const allWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
-        if (allWindows.length > 0) wid = allWindows[0].id;
-      }
-      const tabs = await buildTabList(wid);
-      sendResponse({ tabs });
-    })();
-    return true;
-  }
-
   if (msg.type === "switchTab") {
     try {
       chrome.tabs.update(msg.tabId, { active: true });
-      // Focus the window containing the tab
-      chrome.tabs.get(msg.tabId, (tab) => {
-        if (tab && tab.windowId) {
-          chrome.windows.update(tab.windowId, { focused: true });
-        }
-      });
     } catch (_) {}
-    switcherWindowId = null;
+    switcherOpen = false;
+    switcherTabId = null;
+    sendResponse({ ok: true });
+  }
+  if (msg.type === "switcherClosed") {
+    switcherOpen = false;
+    switcherTabId = null;
     sendResponse({ ok: true });
   }
 });
