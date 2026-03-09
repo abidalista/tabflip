@@ -106,7 +106,6 @@ async function ensureContentScript(tabId) {
     return true;
   } catch (_) {
     try {
-      await chrome.scripting.insertCSS({ target: { tabId }, files: ["styles.css"] });
       await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
       // Small delay for script to initialize
       await new Promise(r => setTimeout(r, 50));
@@ -182,7 +181,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   for (const tab of allTabs) {
     if (!tab.url || !/^https?:\/\//.test(tab.url)) continue;
     try {
-      await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["styles.css"] });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
     } catch (_) {}
   }
