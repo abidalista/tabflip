@@ -7,6 +7,7 @@ let mruStacks = {};
 let screenshots = {};
 let switcherOpen = false;
 let switcherTabId = null;
+let switcherWindowId = null; // fallback popup window for chrome:// pages
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -121,10 +122,45 @@ async function ensureContentScript(tabId) {
   }
 }
 
+// ── Fallback: popup window for pages where content scripts can't run ─
+
+async function openFallbackSwitcher(windowId) {
+  if (switcherWindowId) {
+    try {
+      await chrome.windows.get(switcherWindowId);
+      await chrome.windows.update(switcherWindowId, { focused: true });
+      return;
+    } catch (_) {
+      switcherWindowId = null;
+    }
+  }
+
+  const tabs = await buildTabList(windowId);
+  if (tabs.length < 2) return;
+
+  const cardWidth = 180;
+  const gap = 16;
+  const padding = 48;
+  const width = Math.min(tabs.length * (cardWidth + gap) + padding, 1200);
+  const height = 240;
+
+  const currentWindow = await chrome.windows.get(windowId);
+  const left = Math.round(currentWindow.left + (currentWindow.width - width) / 2);
+  const top = Math.round(currentWindow.top + (currentWindow.height - height) / 2);
+
+  const win = await chrome.windows.create({
+    url: "switcher.html",
+    type: "popup",
+    width, height, left, top,
+    focused: true
+  });
+  switcherWindowId = win.id;
+}
+
 // ── Handle Ctrl+Q command ───────────────────────────────────────────
 
 async function handleCommand() {
-  // If switcher is already open, just cycle
+  // If overlay switcher is already open, just cycle
   if (switcherOpen && switcherTabId) {
     try {
       await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
@@ -135,15 +171,25 @@ async function handleCommand() {
     }
   }
 
-  // First press: open switcher
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!activeTab || !activeTab.url || !/^https?:\/\//.test(activeTab.url)) return;
+  if (!activeTab) return;
+
+  // If on a page where content scripts can't run, use fallback popup window
+  const canInject = activeTab.url && /^https?:\/\//.test(activeTab.url);
+  if (!canInject) {
+    await openFallbackSwitcher(activeTab.windowId);
+    return;
+  }
 
   const tabs = await buildTabList(activeTab.windowId);
   if (tabs.length < 2) return;
 
   const ok = await ensureContentScript(activeTab.id);
-  if (!ok) return;
+  if (!ok) {
+    // Content script injection failed — use fallback
+    await openFallbackSwitcher(activeTab.windowId);
+    return;
+  }
 
   try {
     await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
@@ -168,6 +214,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "complete") {
     setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
+  }
+});
+
+// Clean up fallback popup window
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === switcherWindowId) {
+    switcherWindowId = null;
   }
 });
 
@@ -202,12 +255,33 @@ chrome.commands.onCommand.addListener(async (command) => {
 // ── Messaging ───────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "getMRU") {
+    (async () => {
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!activeTab) { sendResponse({ tabs: [] }); return; }
+      let wid = activeTab.windowId;
+      if (wid === switcherWindowId) {
+        const allWindows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+        if (allWindows.length > 0) wid = allWindows[0].id;
+      }
+      const tabs = await buildTabList(wid);
+      sendResponse({ tabs });
+    })();
+    return true;
+  }
+
   if (msg.type === "switchTab") {
     try {
       chrome.tabs.update(msg.tabId, { active: true });
+      chrome.tabs.get(msg.tabId, (tab) => {
+        if (tab && tab.windowId) {
+          chrome.windows.update(tab.windowId, { focused: true });
+        }
+      });
     } catch (_) {}
     switcherOpen = false;
     switcherTabId = null;
+    switcherWindowId = null;
     sendResponse({ ok: true });
   }
   if (msg.type === "switcherClosed") {
