@@ -208,10 +208,21 @@
 
   // ── Show / hide / cycle ───────────────────────────────────────────
 
-  function resetStuckTimer() {
-    if (stuckTimer) clearTimeout(stuckTimer);
-    // Auto-close after 8 seconds if no input (prevents stuck overlay)
-    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 15000);
+  let autoSwitchTimer = null;
+
+  // Auto-switch after delay if no further input.
+  // Single Ctrl+Q: shows overlay, auto-switches in 1s.
+  // Cycling (Ctrl+Q Q Q): each Q resets the timer.
+  function startAutoSwitch() {
+    if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
+    autoSwitchTimer = setTimeout(() => {
+      if (overlayVisible) switchToSelected();
+    }, 1000);
+  }
+
+  function clearTimers() {
+    if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
+    if (autoSwitchTimer) { clearTimeout(autoSwitchTimer); autoSwitchTimer = null; }
   }
 
   function showSwitcher(tabData) {
@@ -222,11 +233,14 @@
     overlayEl.offsetHeight;
     overlayEl.style.cssText = S.overlay + S.overlayShow;
     overlayVisible = true;
-    resetStuckTimer();
+    startAutoSwitch();
+    // Safety net: force close after 15s no matter what
+    if (stuckTimer) clearTimeout(stuckTimer);
+    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 15000);
   }
 
   function hideSwitcher(notify) {
-    if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
+    clearTimers();
     if (overlayEl) overlayEl.style.cssText = S.overlay;
     overlayVisible = false;
     if (notify) {
@@ -239,7 +253,7 @@
     const prev = selectedIndex;
     selectedIndex = (selectedIndex + 1) % tabs.length;
     updateSelection(prev, selectedIndex);
-    resetStuckTimer();
+    startAutoSwitch(); // reset the auto-switch timer on each cycle
   }
 
   function switchToSelected() {
@@ -284,6 +298,12 @@
       e.preventDefault();
       e.stopPropagation();
       hideSwitcher(true);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      switchToSelected();
+      return;
     }
     if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
       e.preventDefault();
