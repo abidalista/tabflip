@@ -73,6 +73,8 @@ async function buildTabList(wid) {
   const windowTabs = await chrome.tabs.query({ windowId: wid });
   if (windowTabs.length < 2) return [];
 
+  const maxTabs = Math.min(5, windowTabs.length);
+
   const tabMap = new Map();
   for (const t of windowTabs) {
     tabMap.set(t.id, {
@@ -90,32 +92,34 @@ async function buildTabList(wid) {
   const stack = getStack(wid);
 
   for (const id of stack) {
-    if (tabMap.has(id)) {
+    if (tabMap.has(id) && out.length < maxTabs) {
       out.push(tabMap.get(id));
       seen.add(id);
     }
   }
 
   // Fill with remaining window tabs (active first)
-  const active = windowTabs.find(t => t.active);
-  if (active && !seen.has(active.id)) {
-    out.unshift(tabMap.get(active.id));
-    seen.add(active.id);
-  }
-  for (const t of windowTabs) {
-    if (seen.has(t.id)) continue;
-    out.push(tabMap.get(t.id));
-    seen.add(t.id);
-    if (out.length >= 5) break;
+  if (out.length < maxTabs) {
+    const active = windowTabs.find(t => t.active);
+    if (active && !seen.has(active.id)) {
+      out.unshift(tabMap.get(active.id));
+      seen.add(active.id);
+    }
+    for (const t of windowTabs) {
+      if (out.length >= maxTabs) break;
+      if (seen.has(t.id)) continue;
+      out.push(tabMap.get(t.id));
+      seen.add(t.id);
+    }
   }
 
   // Update MRU with what we found
   if (out.length > 0) {
     mruStacks[wid] = out.map(t => t.id);
-    saveMRU(); // fire and forget
+    saveMRU();
   }
 
-  return out.slice(0, 5);
+  return out;
 }
 
 // ── Ensure content script ───────────────────────────────────────────
