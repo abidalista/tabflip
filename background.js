@@ -257,6 +257,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "complete") {
+    // Page navigated while overlay was open — reset state
+    if (tabId === switcherTabId) {
+      switcherOpen = false;
+      switcherTabId = null;
+    }
     setTimeout(() => captureScreenshot(tab.windowId, tabId), 500);
   }
 });
@@ -289,7 +294,7 @@ chrome.commands.onCommand.addListener((command) => {
 
 // ── Messaging ───────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "getMRU") {
     (async () => {
       const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -314,6 +319,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switcherTabId = null;
     switcherWindowId = null;
     sendResponse({ ok: true });
+    return;
   }
 
   if (msg.type === "switcherClosed") {

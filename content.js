@@ -1,6 +1,14 @@
 // TabFlip — content script (fast overlay, all styles inline)
 
 (() => {
+  // Prevent duplicate listeners on extension reload
+  if (window.__tabflipLoaded) {
+    const old = document.getElementById("tabflip-overlay");
+    if (old) old.remove();
+    return;
+  }
+  window.__tabflipLoaded = true;
+
   const old = document.getElementById("tabflip-overlay");
   if (old) old.remove();
 
@@ -96,6 +104,7 @@
         shot.style.cssText = sel ? S.shotSel : S.shot;
         const img = document.createElement("img");
         img.src = tab.screenshot;
+        img.alt = tab.title || "Tab screenshot";
         img.draggable = false;
         img.style.cssText = S.shotImg;
         shot.appendChild(img);
@@ -151,6 +160,10 @@
       meta.appendChild(txt);
       card.appendChild(wrap);
       card.appendChild(meta);
+      card.addEventListener("click", ((idx) => () => {
+        selectedIndex = idx;
+        switchToSelected();
+      })(i));
       container.appendChild(card);
 
       cardEls.push(card);
@@ -198,7 +211,7 @@
   function resetStuckTimer() {
     if (stuckTimer) clearTimeout(stuckTimer);
     // Auto-close after 8 seconds if no input (prevents stuck overlay)
-    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 8000);
+    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 15000);
   }
 
   function showSwitcher(tabData) {

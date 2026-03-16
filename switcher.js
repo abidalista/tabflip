@@ -74,9 +74,12 @@ function render() {
 
 function switchTo() {
   if (selectedIndex >= 0 && selectedIndex < tabs.length) {
-    chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id });
+    chrome.runtime.sendMessage({ type: "switchTab", tabId: tabs[selectedIndex].id }, () => {
+      window.close();
+    });
+  } else {
+    window.close();
   }
-  window.close();
 }
 
 function cycle() {
