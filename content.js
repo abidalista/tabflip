@@ -233,6 +233,7 @@
     overlayEl.offsetHeight;
     overlayEl.style.cssText = S.overlay + S.overlayShow;
     overlayVisible = true;
+    console.log("[TF] overlay shown —", tabs.length, "tabs, selected:", selectedIndex);
     startAutoSwitch();
     // Safety net: force close after 15s no matter what
     if (stuckTimer) clearTimeout(stuckTimer);
@@ -243,6 +244,7 @@
     clearTimers();
     if (overlayEl) overlayEl.style.cssText = S.overlay;
     overlayVisible = false;
+    console.log("[TF] overlay hidden — notify:", notify);
     if (notify) {
       try { chrome.runtime.sendMessage({ type: "switcherClosed" }); } catch (_) {}
     }
@@ -286,6 +288,7 @@
 
   document.addEventListener("keyup", (e) => {
     if (!overlayVisible) return;
+    console.log("[TF] keyup:", e.key);
     if (e.key === "Control" || e.key === "Meta") {
       e.preventDefault();
       switchToSelected();
@@ -294,6 +297,7 @@
 
   document.addEventListener("keydown", (e) => {
     if (!overlayVisible) return;
+    console.log("[TF] keydown:", e.key, "ctrl:", e.ctrlKey, "meta:", e.metaKey);
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();

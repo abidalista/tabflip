@@ -185,6 +185,7 @@ async function handleCommand() {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!activeTab) return;
+    console.log("[TF] handleCommand — tab:", activeTab.id, "window:", activeTab.windowId, "url:", activeTab.url?.slice(0, 60));
 
     // Don't operate on the switcher popup window itself
     if (activeTab.windowId === switcherWindowId) return;
@@ -254,6 +255,7 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   loadMRU().then(() => {
     pushTab(windowId, tabId);
     saveMRU();
+    console.log("[TF] MRU updated — window:", windowId, "stack:", getStack(windowId));
   });
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
 });
