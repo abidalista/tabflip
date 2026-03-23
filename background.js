@@ -186,6 +186,9 @@ async function handleCommand() {
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!activeTab) return;
 
+    // Don't operate on the switcher popup window itself
+    if (activeTab.windowId === switcherWindowId) return;
+
     // ── Already open on THIS tab? Just cycle ──
     if (switcherOpen && switcherTabId === activeTab.id) {
       try {
@@ -314,11 +317,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "switchTab") {
-    chrome.tabs.update(msg.tabId, { active: true }).then(() =>
-      chrome.tabs.get(msg.tabId).then(t =>
-        chrome.windows.update(t.windowId, { focused: true })
-      )
-    ).catch(() => {});
+    // Just activate the tab — don't focus other windows
+    chrome.tabs.update(msg.tabId, { active: true }).catch(() => {});
     switcherOpen = false;
     switcherTabId = null;
     switcherWindowId = null;

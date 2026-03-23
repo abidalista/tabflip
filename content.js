@@ -217,7 +217,7 @@
     if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
     autoSwitchTimer = setTimeout(() => {
       if (overlayVisible) switchToSelected();
-    }, 1000);
+    }, 700);
   }
 
   function clearTimers() {
