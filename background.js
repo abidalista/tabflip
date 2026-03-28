@@ -114,12 +114,6 @@ async function buildTabList(wid) {
     }
   }
 
-  // Update MRU with what we found
-  if (out.length > 0) {
-    mruStacks[wid] = out.map(t => t.id);
-    saveMRU();
-  }
-
   return out;
 }
 
@@ -188,7 +182,7 @@ function resetAutoSwitch() {
   if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
   autoSwitchTimer = setTimeout(() => {
     if (switcherOpen && switcherTabId) {
-      console.log("[TF] auto-switch firing (2s since last Q press)");
+
       try {
         chrome.tabs.sendMessage(switcherTabId, { type: "autoSwitch" });
       } catch (_) {}
@@ -203,11 +197,17 @@ function clearAutoSwitch() {
   if (autoSwitchTimer) { clearTimeout(autoSwitchTimer); autoSwitchTimer = null; }
 }
 
+let commandInFlight = false;
+
 async function handleCommand() {
+  // Allow cycling even during in-flight (switcherOpen check handles it)
+  // But block duplicate opens
+  if (commandInFlight && !switcherOpen) return;
+
   try {
+    commandInFlight = true;
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!activeTab) return;
-    console.log("[TF] handleCommand — tab:", activeTab.id, "window:", activeTab.windowId, "url:", activeTab.url?.slice(0, 60));
 
     // Don't operate on the switcher popup window itself
     if (activeTab.windowId === switcherWindowId) return;
@@ -266,7 +266,9 @@ async function handleCommand() {
     // Overlay failed — fallback
     await openFallbackSwitcher(activeTab.windowId);
 
-  } catch (_) {}
+  } catch (_) {} finally {
+    commandInFlight = false;
+  }
 }
 
 // ── Tab events ──────────────────────────────────────────────────────
@@ -280,7 +282,6 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   loadMRU().then(() => {
     pushTab(windowId, tabId);
     saveMRU();
-    console.log("[TF] MRU updated — window:", windowId, "stack:", getStack(windowId));
   });
   setTimeout(() => captureScreenshot(windowId, tabId), 800);
 });

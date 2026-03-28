@@ -216,17 +216,17 @@
     overlayEl.offsetHeight;
     overlayEl.style.cssText = S.overlay + S.overlayShow;
     overlayVisible = true;
-    console.log("[TF] overlay shown —", tabs.length, "tabs, selected:", selectedIndex);
+
     // Safety net: force close after 30s to prevent permanent stuck overlay
     if (stuckTimer) clearTimeout(stuckTimer);
-    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 30000);
+    stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 8000);
   }
 
   function hideSwitcher(notify) {
     if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
     if (overlayEl) overlayEl.style.cssText = S.overlay;
     overlayVisible = false;
-    console.log("[TF] overlay hidden — notify:", notify);
+
     if (notify) {
       try { chrome.runtime.sendMessage({ type: "switcherClosed" }); } catch (_) {}
     }
@@ -261,7 +261,7 @@
       hideSwitcher(false);
       sendResponse({ ok: true });
     } else if (msg.type === "autoSwitch") {
-      console.log("[TF] autoSwitch received from background");
+
       switchToSelected();
       sendResponse({ ok: true });
     } else if (msg.type === "ping") {
@@ -273,7 +273,7 @@
 
   document.addEventListener("keyup", (e) => {
     if (!overlayVisible) return;
-    console.log("[TF] keyup:", e.key);
+
     if (e.key === "Control" || e.key === "Meta") {
       e.preventDefault();
       switchToSelected();
@@ -282,7 +282,7 @@
 
   document.addEventListener("keydown", (e) => {
     if (!overlayVisible) return;
-    console.log("[TF] keydown:", e.key, "ctrl:", e.ctrlKey, "meta:", e.metaKey);
+
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
