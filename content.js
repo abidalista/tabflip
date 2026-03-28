@@ -260,6 +260,10 @@
     } else if (msg.type === "hide") {
       hideSwitcher(false);
       sendResponse({ ok: true });
+    } else if (msg.type === "autoSwitch") {
+      console.log("[TF] autoSwitch received from background");
+      switchToSelected();
+      sendResponse({ ok: true });
     } else if (msg.type === "ping") {
       sendResponse({ ok: true });
     }

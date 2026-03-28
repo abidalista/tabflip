@@ -9,6 +9,7 @@ let switcherOpen = false;
 let switcherTabId = null;
 let switcherWindowId = null;
 let stateLoaded = false;
+let autoSwitchTimer = null; // fires when user stops pressing Q
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -181,6 +182,27 @@ async function openFallbackSwitcher(windowId) {
 
 // ── Handle Ctrl+Q ───────────────────────────────────────────────────
 
+// ── Auto-switch: fires 2s after last Q press (fallback for keyup) ──
+
+function resetAutoSwitch() {
+  if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
+  autoSwitchTimer = setTimeout(() => {
+    if (switcherOpen && switcherTabId) {
+      console.log("[TF] auto-switch firing (2s since last Q press)");
+      try {
+        chrome.tabs.sendMessage(switcherTabId, { type: "autoSwitch" });
+      } catch (_) {}
+      switcherOpen = false;
+      switcherTabId = null;
+    }
+    autoSwitchTimer = null;
+  }, 2000);
+}
+
+function clearAutoSwitch() {
+  if (autoSwitchTimer) { clearTimeout(autoSwitchTimer); autoSwitchTimer = null; }
+}
+
 async function handleCommand() {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -198,6 +220,8 @@ async function handleCommand() {
         switcherOpen = false;
         switcherTabId = null;
       }
+      // Reset auto-switch: 2s after last Q press, switch automatically
+      resetAutoSwitch();
       return;
     }
 
@@ -234,6 +258,7 @@ async function handleCommand() {
       if (r && r.ok) {
         switcherOpen = true;
         switcherTabId = activeTab.id;
+        resetAutoSwitch();
         return;
       }
     } catch (_) {}
@@ -319,7 +344,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "switchTab") {
-    // Just activate the tab — don't focus other windows
+    clearAutoSwitch();
     chrome.tabs.update(msg.tabId, { active: true }).catch(() => {});
     switcherOpen = false;
     switcherTabId = null;
@@ -329,6 +354,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "switcherClosed") {
+    clearAutoSwitch();
     switcherOpen = false;
     switcherTabId = null;
     sendResponse({ ok: true });
