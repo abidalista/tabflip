@@ -1,14 +1,16 @@
 // TabFlip — content script (fast overlay, all styles inline)
 
 (() => {
-  // Prevent duplicate listeners on extension reload
+  // Prevent duplicate initialization on extension reload
   if (window.__tabflipLoaded) {
+    // Clean up old overlay but don't re-initialize
     const old = document.getElementById("tabflip-overlay");
     if (old) old.remove();
     return;
   }
   window.__tabflipLoaded = true;
 
+  // Clean up any leftover overlay from previous session
   const old = document.getElementById("tabflip-overlay");
   if (old) old.remove();
 

@@ -54,12 +54,23 @@ async function captureScreenshot(wid, tid) {
   if (switcherOpen) return;
   try {
     screenshots[tid] = await chrome.tabs.captureVisibleTab(wid, { format: "jpeg", quality: 50 });
+    
+    // Clean up old screenshots if we exceed the limit
     const keys = Object.keys(screenshots);
     if (keys.length > MAX_SCREENSHOTS) {
+      // Keep all tabs in MRU stacks across all windows
       const keep = new Set(Object.values(mruStacks).flat());
-      for (const k of keys) {
-        if (!keep.has(Number(k))) { delete screenshots[k]; }
-        if (Object.keys(screenshots).length <= MAX_SCREENSHOTS) break;
+      
+      // Sort by tab ID (older tabs have lower IDs generally) and remove oldest first
+      const sortedKeys = keys.map(Number).sort((a, b) => a - b);
+      
+      for (const k of sortedKeys) {
+        // Only delete if not in any MRU stack
+        if (!keep.has(k)) { 
+          delete screenshots[k];
+          // Stop once we're back under the limit
+          if (Object.keys(screenshots).length <= MAX_SCREENSHOTS) break;
+        }
       }
     }
   } catch (_) {}
@@ -181,8 +192,8 @@ async function openFallbackSwitcher(windowId) {
 function resetAutoSwitch() {
   if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
   autoSwitchTimer = setTimeout(() => {
+    // Double-check state hasn't changed (race condition prevention)
     if (switcherOpen && switcherTabId) {
-
       try {
         chrome.tabs.sendMessage(switcherTabId, { type: "autoSwitch" });
       } catch (_) {}
@@ -194,18 +205,35 @@ function resetAutoSwitch() {
 }
 
 function clearAutoSwitch() {
-  if (autoSwitchTimer) { clearTimeout(autoSwitchTimer); autoSwitchTimer = null; }
+  if (autoSwitchTimer) { 
+    clearTimeout(autoSwitchTimer); 
+    autoSwitchTimer = null; 
+  }
 }
 
 let commandInFlight = false;
+let commandLock = null;
 
 async function handleCommand() {
   // Allow cycling even during in-flight (switcherOpen check handles it)
   // But block duplicate opens
   if (commandInFlight && !switcherOpen) return;
 
+  // Ensure previous command lock is cleared if it got stuck
+  if (commandLock) {
+    const now = Date.now();
+    if (now - commandLock > 5000) {
+      // Lock is stale (> 5s), clear it
+      commandInFlight = false;
+      commandLock = null;
+    } else {
+      return;
+    }
+  }
+
   try {
     commandInFlight = true;
+    commandLock = Date.now();
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!activeTab) return;
 
@@ -215,21 +243,28 @@ async function handleCommand() {
     // ── Already open on THIS tab? Just cycle ──
     if (switcherOpen && switcherTabId === activeTab.id) {
       try {
-        chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
-      } catch (_) {
+        await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
+        // Reset auto-switch: 2s after last Q press, switch automatically
+        resetAutoSwitch();
+        return;
+      } catch (err) {
+        // Message failed - content script might be gone, reset state
         switcherOpen = false;
         switcherTabId = null;
+        clearAutoSwitch();
       }
-      // Reset auto-switch: 2s after last Q press, switch automatically
-      resetAutoSwitch();
-      return;
     }
 
     // ── Was open on different tab? Kill it ──
     if (switcherOpen && switcherTabId) {
-      try { chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); } catch (_) {}
+      try { 
+        await chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); 
+      } catch (_) {
+        // Failed to hide, but continue anyway
+      }
       switcherOpen = false;
       switcherTabId = null;
+      clearAutoSwitch();
     }
 
     // ── Can we inject? ──
@@ -268,6 +303,7 @@ async function handleCommand() {
 
   } catch (_) {} finally {
     commandInFlight = false;
+    commandLock = null;
   }
 }
 
@@ -275,9 +311,12 @@ async function handleCommand() {
 
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
   if (switcherOpen && switcherTabId && switcherTabId !== tabId) {
-    try { chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); } catch (_) {}
+    try { 
+      chrome.tabs.sendMessage(switcherTabId, { type: "hide" }).catch(() => {}); 
+    } catch (_) {}
     switcherOpen = false;
     switcherTabId = null;
+    clearAutoSwitch();
   }
   loadMRU().then(() => {
     pushTab(windowId, tabId);
@@ -287,7 +326,17 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  loadMRU().then(() => { removeTab(tabId); saveMRU(); });
+  loadMRU().then(() => { 
+    removeTab(tabId); 
+    saveMRU(); 
+    
+    // If the removed tab was displaying the switcher, close it
+    if (switcherTabId === tabId) {
+      switcherOpen = false;
+      switcherTabId = null;
+      clearAutoSwitch();
+    }
+  });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
@@ -302,12 +351,30 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === switcherWindowId) switcherWindowId = null;
+  if (windowId === switcherWindowId) {
+    switcherWindowId = null;
+    clearAutoSwitch();
+  }
+  // Clean up MRU stack for closed window
+  delete mruStacks[windowId];
+  saveMRU();
 });
 
 // ── Startup / Install ───────────────────────────────────────────────
 
-chrome.runtime.onStartup.addListener(() => loadMRU());
+chrome.runtime.onStartup.addListener(async () => {
+  await loadMRU();
+  // Rebuild MRU from current tabs if state was lost
+  if (Object.keys(mruStacks).length === 0) {
+    const allTabs = await chrome.tabs.query({});
+    for (const tab of allTabs) {
+      if (tab.active) {
+        pushTab(tab.windowId, tab.id);
+      }
+    }
+    await saveMRU();
+  }
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
@@ -349,7 +416,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tabs.update(msg.tabId, { active: true }).catch(() => {});
     switcherOpen = false;
     switcherTabId = null;
-    switcherWindowId = null;
+    // Close fallback window if it was open
+    if (switcherWindowId) {
+      chrome.windows.remove(switcherWindowId).catch(() => {});
+      switcherWindowId = null;
+    }
     sendResponse({ ok: true });
     return;
   }
@@ -358,6 +429,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     clearAutoSwitch();
     switcherOpen = false;
     switcherTabId = null;
+    // Also clear window ID if switcher was closed
+    if (switcherWindowId) {
+      chrome.windows.remove(switcherWindowId).catch(() => {});
+      switcherWindowId = null;
+    }
     sendResponse({ ok: true });
   }
 });
