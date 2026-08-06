@@ -1,6 +1,6 @@
 # TabFlip
 
-Arc-style tab switcher for Chrome. Cycle through your 5 most recent tabs with visual previews using a single shortcut.
+Arc-style tab switcher for Chrome. Cycle through your most recent tabs with visual previews using a single shortcut.
 
 ## How it works
 
@@ -26,7 +26,7 @@ Coming soon.
 ## Notes
 
 - Works on any website. On `chrome://` pages (where Chrome blocks extensions), a fallback popup window is used instead.
-- Shows your 5 most recently used tabs per window.
+- Shows your recently used tabs per window — 5 by default, configurable up to 25 in the extension popup. Tabs tile in rows of 5.
 - Screenshots are captured in the background as you browse — JPEG, quality 50, stored in memory only.
 - No data leaves your browser. No analytics, no tracking, no external requests.
 
@@ -47,7 +47,7 @@ manifest.json    — Extension config (Manifest V3)
 background.js    — Service worker: MRU tracking, screenshots, command handling
 content.js       — Overlay UI injected into web pages (all styles inline)
 switcher.html/js — Fallback popup window for chrome:// pages
-popup.html/css   — Extension icon popup with shortcut instructions
+popup.html/js/css — Extension icon popup with shortcut instructions and settings
 styles.css       — Legacy (unused, kept for reference)
 icons/           — 16, 48, 128px extension icons
 ```

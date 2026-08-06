@@ -26,8 +26,15 @@
 ## Tab Count
 - [ ] With 2 tabs open, hold `Ctrl+Q`. Does it show exactly 2 cards?
 - [ ] With 3 tabs, does it show 3?
-- [ ] With 5+ tabs, does it cap at 5 cards?
+- [ ] With default settings and 5+ tabs, does it cap at 5 cards?
 - [ ] With only 1 tab open, press `Ctrl+Q`. Does it do nothing or fail gracefully?
+
+## Configurable Tab Count
+- [ ] In the popup, change "Recent tabs shown" to 10. Open 12 tabs, visit each once, press `Ctrl+Q`. Does it show 10 cards tiled as two rows of 5?
+- [ ] With 7 recent tabs and the setting at 10+, does it show 5 cards on the first row and 2 on the second?
+- [ ] Change the setting back to 5 while the MRU list has more than 5 entries. Open overlay. Does it now cap at 5?
+- [ ] Change the setting, then reopen the popup. Does it remember the last selected value?
+- [ ] Trigger the fallback popup window (see Restricted Pages) with 10+ tabs. Does the window resize to fit multiple rows without clipping?
 
 ## MRU Order
 - [ ] Visit tabs in order: A → B → C → A. Open overlay. Is the order A (current), C, B?

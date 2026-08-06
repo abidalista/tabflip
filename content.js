@@ -39,7 +39,7 @@
       border:1px solid rgba(255,255,255,0.08);
       box-shadow:0 32px 80px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.05);
     `,
-    cards: `display:flex;align-items:center;gap:16px;`,
+    cards: `display:grid;justify-items:center;align-items:center;gap:24px 16px;max-height:80vh;overflow-y:auto;padding:24px;`,
     card: `display:flex;flex-direction:column;gap:8px;width:160px;cursor:pointer;flex-shrink:0;opacity:0.45;transform:scale(0.92);transition:transform 0.1s,opacity 0.1s,width 0.1s;`,
     cardSel: `display:flex;flex-direction:column;gap:8px;width:200px;cursor:pointer;flex-shrink:0;opacity:1;transform:scale(1.08);z-index:10;transition:transform 0.1s,opacity 0.1s,width 0.1s;`,
     wrap: `border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 4px 16px rgba(0,0,0,0.3);`,
@@ -87,6 +87,9 @@
     const container = overlayEl.querySelector("#tabflip-cards");
     container.innerHTML = "";
     cardEls = [];
+
+    const cols = Math.min(5, tabs.length);
+    container.style.cssText = S.cards + `grid-template-columns:repeat(${cols},200px);`;
 
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
