@@ -7,6 +7,9 @@ function render() {
   const container = document.getElementById("cards");
   container.innerHTML = "";
 
+  const cols = Math.min(5, tabs.length);
+  container.style.gridTemplateColumns = `repeat(${cols}, 200px)`;
+
   tabs.forEach((tab, i) => {
     const card = document.createElement("div");
     card.className = "card" + (i === selectedIndex ? " selected" : "");

@@ -1,7 +1,7 @@
 // TabFlip — background service worker (fast & reliable)
 
-const MAX_MRU = 5;
-const MAX_SCREENSHOTS = 20;
+const DEFAULT_MAX_TABS = 5;
+const MAX_TABS_LIMIT = 25;
 
 let mruStacks = {};
 let screenshots = {};
@@ -9,6 +9,8 @@ let switcherOpen = false;
 let switcherTabId = null;
 let switcherWindowId = null;
 let stateLoaded = false;
+let settingsLoaded = false;
+let maxTabs = DEFAULT_MAX_TABS;
 let autoSwitchTimer = null; // fires when user stops pressing Q
 
 // ── Persistence ─────────────────────────────────────────────────────
@@ -26,6 +28,39 @@ async function loadMRU() {
   stateLoaded = true;
 }
 
+// ── Settings ────────────────────────────────────────────────────────
+
+function clampMaxTabs(n) {
+  n = parseInt(n, 10);
+  if (!Number.isFinite(n) || n < 2) return DEFAULT_MAX_TABS;
+  return Math.min(n, MAX_TABS_LIMIT);
+}
+
+function screenshotLimit() {
+  return Math.max(20, maxTabs * 2);
+}
+
+async function loadSettings() {
+  if (settingsLoaded) return;
+  try {
+    const data = await chrome.storage.sync.get({ maxTabs: DEFAULT_MAX_TABS });
+    maxTabs = clampMaxTabs(data.maxTabs);
+  } catch (_) {}
+  settingsLoaded = true;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.maxTabs) {
+    maxTabs = clampMaxTabs(changes.maxTabs.newValue);
+    // Trim any stacks that now exceed the new limit
+    for (const wid of Object.keys(mruStacks)) {
+      const s = mruStacks[wid];
+      if (s.length > maxTabs) s.length = maxTabs;
+    }
+    saveMRU();
+  }
+});
+
 // ── MRU helpers ─────────────────────────────────────────────────────
 
 function getStack(wid) {
@@ -38,7 +73,7 @@ function pushTab(wid, tid) {
   const i = s.indexOf(tid);
   if (i !== -1) s.splice(i, 1);
   s.unshift(tid);
-  if (s.length > MAX_MRU) s.length = MAX_MRU;
+  if (s.length > maxTabs) s.length = maxTabs;
 }
 
 function removeTab(tid) {
@@ -54,22 +89,23 @@ async function captureScreenshot(wid, tid) {
   if (switcherOpen) return;
   try {
     screenshots[tid] = await chrome.tabs.captureVisibleTab(wid, { format: "jpeg", quality: 50 });
-    
+
     // Clean up old screenshots if we exceed the limit
     const keys = Object.keys(screenshots);
-    if (keys.length > MAX_SCREENSHOTS) {
+    const limit = screenshotLimit();
+    if (keys.length > limit) {
       // Keep all tabs in MRU stacks across all windows
       const keep = new Set(Object.values(mruStacks).flat());
-      
+
       // Sort by tab ID (older tabs have lower IDs generally) and remove oldest first
       const sortedKeys = keys.map(Number).sort((a, b) => a - b);
-      
+
       for (const k of sortedKeys) {
         // Only delete if not in any MRU stack
-        if (!keep.has(k)) { 
+        if (!keep.has(k)) {
           delete screenshots[k];
           // Stop once we're back under the limit
-          if (Object.keys(screenshots).length <= MAX_SCREENSHOTS) break;
+          if (Object.keys(screenshots).length <= limit) break;
         }
       }
     }
@@ -80,12 +116,13 @@ async function captureScreenshot(wid, tid) {
 
 async function buildTabList(wid) {
   await loadMRU();
+  await loadSettings();
 
   // One query gets everything we need
   const windowTabs = await chrome.tabs.query({ windowId: wid });
   if (windowTabs.length < 2) return [];
 
-  const maxTabs = Math.min(5, windowTabs.length);
+  const limit = Math.min(maxTabs, windowTabs.length);
 
   const tabMap = new Map();
   for (const t of windowTabs) {
@@ -104,21 +141,21 @@ async function buildTabList(wid) {
   const stack = getStack(wid);
 
   for (const id of stack) {
-    if (tabMap.has(id) && out.length < maxTabs) {
+    if (tabMap.has(id) && out.length < limit) {
       out.push(tabMap.get(id));
       seen.add(id);
     }
   }
 
   // Fill with remaining window tabs (active first)
-  if (out.length < maxTabs) {
+  if (out.length < limit) {
     const active = windowTabs.find(t => t.active);
     if (active && !seen.has(active.id)) {
       out.unshift(tabMap.get(active.id));
       seen.add(active.id);
     }
     for (const t of windowTabs) {
-      if (out.length >= maxTabs) break;
+      if (out.length >= limit) break;
       if (seen.has(t.id)) continue;
       out.push(tabMap.get(t.id));
       seen.add(t.id);
@@ -162,8 +199,10 @@ async function openFallbackSwitcher(windowId) {
   const tabs = await buildTabList(windowId);
   if (tabs.length < 2) return;
 
-  const width = Math.min(tabs.length * 196 + 48, 1200);
-  const height = 240;
+  const cols = Math.min(5, tabs.length);
+  const rows = Math.ceil(tabs.length / 5);
+  const width = Math.min(cols * 196 + 96, 1200);
+  const height = Math.min(320 + (rows - 1) * 180, 960);
 
   try {
     const cw = await chrome.windows.get(windowId);
@@ -364,6 +403,7 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await loadMRU();
+  await loadSettings();
   // Rebuild MRU from current tabs if state was lost
   if (Object.keys(mruStacks).length === 0) {
     const allTabs = await chrome.tabs.query({});
@@ -378,6 +418,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadMRU();
+  await loadSettings();
   const allTabs = await chrome.tabs.query({});
   for (const tab of allTabs) {
     pushTab(tab.windowId, tab.id);
