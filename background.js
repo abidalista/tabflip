@@ -362,6 +362,21 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 // ── Startup / Install ───────────────────────────────────────────────
 
+// Screenshots can only be captured for a window's *active* tab (Chrome's
+// captureVisibleTab API has no way to capture background tabs). Doing this
+// once up front means the active tab in each window already has a preview
+// the first time the switcher opens, instead of showing a blank placeholder
+// until the user manually visits it.
+async function captureActiveTabScreenshots() {
+  try {
+    const windows = await chrome.windows.getAll({ windowTypes: ["normal"], populate: true });
+    for (const w of windows) {
+      const active = w.tabs && w.tabs.find(t => t.active);
+      if (active) await captureScreenshot(w.id, active.id);
+    }
+  } catch (_) {}
+}
+
 chrome.runtime.onStartup.addListener(async () => {
   await loadMRU();
   // Rebuild MRU from current tabs if state was lost
@@ -374,6 +389,8 @@ chrome.runtime.onStartup.addListener(async () => {
     }
     await saveMRU();
   }
+  // Give restored tabs a moment to paint before capturing
+  setTimeout(captureActiveTabScreenshots, 500);
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -386,6 +403,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     }
   }
   await saveMRU();
+  setTimeout(captureActiveTabScreenshots, 500);
 });
 
 // ── Command ─────────────────────────────────────────────────────────
