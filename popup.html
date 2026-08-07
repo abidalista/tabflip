@@ -13,8 +13,12 @@
         <span class="label">open switcher</span>
       </div>
       <div class="shortcut-row">
-        <span class="keys">hold <kbd>Ctrl</kbd>, press <kbd>Q</kbd></span>
+        <span class="keys">hold <kbd>Ctrl</kbd>, press <kbd>Q</kbd> or arrows</span>
         <span class="label">cycle tabs</span>
+      </div>
+      <div class="shortcut-row">
+        <span class="keys">add <kbd>Shift</kbd></span>
+        <span class="label">cycle backward</span>
       </div>
       <div class="shortcut-row">
         <span class="keys">release <kbd>Ctrl</kbd></span>
@@ -22,8 +26,16 @@
       </div>
     </div>
     <p class="tip">Tip: Tab previews load after you visit each tab once.</p>
+    <p class="tip">Shortcuts above are the defaults — rebind them (any modifier + key) at <code>chrome://extensions/shortcuts</code>. Release still switches, whichever modifier you choose.</p>
+    <div class="divider"></div>
+    <div class="setting-row">
+      <label class="setting-label" for="leaveOpen">Leave switcher open on release</label>
+      <input type="checkbox" id="leaveOpen" class="setting-checkbox">
+    </div>
+    <p class="tip">When on, releasing <kbd>Ctrl</kbd> leaves the switcher open instead of switching — press <kbd>Enter</kbd> or click a tab to confirm.</p>
     <div class="divider"></div>
     <a href="https://buymeacoffee.com/abidalista" target="_blank" class="coffee">☕ buy me a coffee</a>
   </div>
+  <script src="popup.js"></script>
 </body>
 </html>

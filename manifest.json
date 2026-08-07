@@ -46,6 +46,13 @@
         "mac": "MacCtrl+Q"
       },
       "description": "Cycle through recent tabs"
+    },
+    "cycle-tab-backward": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Q",
+        "mac": "MacCtrl+Shift+Q"
+      },
+      "description": "Cycle through recent tabs (backward)"
     }
   }
 }

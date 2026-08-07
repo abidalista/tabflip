@@ -13,12 +13,40 @@
 - [ ] Hold `Ctrl`, press `Q`. Does the overlay appear with tab cards?
 - [ ] While still holding `Ctrl`, press `Q` again. Does the selection move right?
 - [ ] Keep pressing `Q`. Does it cycle through all tabs and wrap around?
-- [ ] Release `Ctrl`. Does it switch to the highlighted tab and close the overlay?
-- [ ] If release doesn't trigger, wait 2 seconds. Does the auto-switch fire?
+- [ ] Release `Ctrl` immediately after cycling. Does it switch right away (not after a delay)?
+- [ ] Pause for a few seconds while holding `Ctrl` and looking at a card before releasing. Does it wait for you indefinitely (no premature switch), then switch on release as normal?
+
+## Backward Cycling & Arrow Keys
+- [ ] Hold `Ctrl`, press `Q` a few times to move forward, then hold `Shift` and press `Q`. Does the selection move back one?
+- [ ] Open overlay, press `→` or `↓`. Does the selection move forward, same as `Q`?
+- [ ] Open overlay, press `←` or `↑`. Does the selection move backward?
+- [ ] Cycle backward past the first card. Does it wrap around to the last card?
+- [ ] Cycle forward past the last card. Does it still wrap around to the first (unchanged behavior)?
+- [ ] Trigger the `chrome://` fallback popup (see Restricted Pages) and repeat the above — do `Shift+Q` and arrow keys work there too?
 
 ## Manual Confirm
 - [ ] Open overlay, press `Enter`. Does it switch to the selected tab immediately?
 - [ ] Open overlay, click a card. Does it switch to that tab immediately?
+
+## Leave Switcher Open Setting
+- [ ] In the popup, confirm "Leave switcher open on release" is unchecked by default. Release `Ctrl` after cycling — does it switch immediately (default behavior)?
+- [ ] Check the setting. Hold `Ctrl+Q`, cycle, then release `Ctrl`. Does the overlay stay open instead of switching?
+- [ ] With the setting on, wait a few seconds after releasing/cycling. Does it stay open indefinitely (no delayed auto-switch at all)?
+- [ ] With the setting off (default), open the overlay and use only arrow keys (no `Q`) to browse for a couple seconds while still holding `Ctrl`. Does it stay open the whole time instead of auto-switching mid-browse?
+- [ ] With the setting on, press `Enter`. Does it switch to the selected tab?
+- [ ] With the setting on, click a card. Does it switch immediately regardless of the setting?
+- [ ] With the setting on, press `Ctrl+Q` again after releasing (without switching). Does it resume cycling from where you left off, instead of resetting?
+- [ ] Repeat the above in the `chrome://` fallback popup — same checkbox, same behavior?
+
+## Custom Shortcuts
+- [ ] At `chrome://extensions/shortcuts`, rebind "Cycle through recent tabs" to `Alt+T`, leave backward as default.
+- [ ] Hold `Alt`, press `T`. Does the overlay open?
+- [ ] While still holding `Alt`, press `T` again (repeat, not just the first press). Does the selection keep advancing each time? (Known issue: on some Brave configs this intermittently misses a press — an occasional Chromium/Brave active-tab reporting quirk, not fixable from extension code. Arrow keys aren't affected and are the reliable fallback if hit.)
+- [ ] Release `Alt`. Does it switch (not requiring Enter)?
+- [ ] With a text field focused on the page (e.g. a search box), hold `Alt` and press `T` a few times. Does no "t" get typed into the field?
+- [ ] Rebind backward to `Alt+Shift+T` to match. Hold `Alt`, press `Shift+T`. Does it cycle backward?
+- [ ] Repeat rebinding + release test with the `chrome://` fallback popup (trigger via a restricted page).
+- [ ] Restore both shortcuts to their defaults (`Ctrl+Q` / `Ctrl+Shift+Q`) and confirm everything still works as before.
 
 ## Cancel
 - [ ] Open overlay with `Ctrl+Q`, press `Esc`. Does it close without switching tabs?
@@ -58,8 +86,9 @@
 - [ ] Go to `chrome://extensions` → TabFlip → click "service worker" inspect link, close devtools. Press `Ctrl+Q`. Still works?
 
 ## Overlay Stuck Prevention
-- [ ] Open overlay, do nothing for 8 seconds. Does it auto-close?
+- [ ] Open overlay, do nothing for 8 seconds. Does it auto-close (without switching to any tab)?
 - [ ] Open overlay, switch to another app (Cmd+Tab), come back. Is overlay gone or closeable?
+- [ ] Repeat the 8s no-interaction case in the `chrome://` fallback popup — does the window close itself too?
 
 ## Popup
 - [ ] Click TabFlip icon in toolbar. Does popup appear?
