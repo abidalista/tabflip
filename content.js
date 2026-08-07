@@ -1,6 +1,11 @@
 // TabFlip — content script (fast overlay, all styles inline)
 
 (() => {
+  // Bail out quietly if this instance is orphaned — the extension was
+  // reloaded/updated since injection, so chrome.runtime is stripped and
+  // any chrome.runtime.* call below would throw an uncaught error.
+  if (!chrome.runtime || !chrome.runtime.id) return;
+
   // Prevent duplicate initialization on extension reload
   if (window.__tabflipLoaded) {
     // Clean up old overlay but don't re-initialize
@@ -20,6 +25,28 @@
   let selectedIndex = 0;
   let overlayVisible = false;
   let stuckTimer = null;
+  // Configured (not modifier) keys for cycle-tab / cycle-tab-backward,
+  // whatever the user has them bound to — defaults match this extension's
+  // own defaults until the real values arrive with showSwitcher.
+  let cycleKeys = {
+    forward: { key: "q", shift: false },
+    backward: { key: "q", shift: true },
+  };
+  let activationKeys = ["q"];
+
+  // ── Settings ──────────────────────────────────────────────────────
+
+  let leaveSwitcherOpen = false;
+  try {
+    chrome.storage.sync.get({ leaveSwitcherOpen: false }, (res) => {
+      leaveSwitcherOpen = res.leaveSwitcherOpen === true;
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "sync" && changes.leaveSwitcherOpen) {
+        leaveSwitcherOpen = changes.leaveSwitcherOpen.newValue === true;
+      }
+    });
+  } catch (_) {}
 
   // ── Styles ────────────────────────────────────────────────────────
 
@@ -210,7 +237,22 @@
 
   // ── Show / hide / cycle ───────────────────────────────────────────
 
-  function showSwitcher(tabData) {
+  function showSwitcher(tabData, keys) {
+    // Re-read fresh on every open rather than trusting only the onChanged
+    // listener — a long-lived tab's content script can miss storage events
+    // (e.g. across an extension reload during dev), leaving it stuck on a
+    // stale cached value.
+    try {
+      chrome.storage.sync.get({ leaveSwitcherOpen: false }, (res) => {
+        leaveSwitcherOpen = res.leaveSwitcherOpen === true;
+      });
+    } catch (_) {}
+
+    if (keys && keys.forward && keys.backward) {
+      cycleKeys = keys;
+      activationKeys = [...new Set([keys.forward.key, keys.backward.key])];
+    }
+
     tabs = tabData;
     selectedIndex = 1;
     if (!overlayEl) createOverlay();
@@ -219,7 +261,10 @@
     overlayEl.style.cssText = S.overlay + S.overlayShow;
     overlayVisible = true;
 
-    // Safety net: force close after 30s to prevent permanent stuck overlay
+    // Safety net: force close after 8s of no interaction at all, in case
+    // the overlay somehow gets stuck (release event lost, tab lost focus,
+    // etc). This only closes — it never switches on its own, so it can't
+    // race ahead of the user actually deciding.
     if (stuckTimer) clearTimeout(stuckTimer);
     stuckTimer = setTimeout(() => { if (overlayVisible) hideSwitcher(true); }, 8000);
   }
@@ -234,10 +279,12 @@
     }
   }
 
-  function cycleForward() {
+  function cycle(direction) {
     if (!overlayVisible || tabs.length < 2) return;
     const prev = selectedIndex;
-    selectedIndex = (selectedIndex + 1) % tabs.length;
+    selectedIndex = direction === "backward"
+      ? (selectedIndex - 1 + tabs.length) % tabs.length
+      : (selectedIndex + 1) % tabs.length;
     updateSelection(prev, selectedIndex);
   }
 
@@ -254,17 +301,13 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "showSwitcher" && msg.tabs) {
-      showSwitcher(msg.tabs);
+      showSwitcher(msg.tabs, msg.cycleKeys);
       sendResponse({ ok: true });
     } else if (msg.type === "cycle") {
-      cycleForward();
+      cycle(msg.direction);
       sendResponse({ ok: true });
     } else if (msg.type === "hide") {
       hideSwitcher(false);
-      sendResponse({ ok: true });
-    } else if (msg.type === "autoSwitch") {
-
-      switchToSelected();
       sendResponse({ ok: true });
     } else if (msg.type === "ping") {
       sendResponse({ ok: true });
@@ -275,11 +318,13 @@
 
   document.addEventListener("keyup", (e) => {
     if (!overlayVisible) return;
+    // Chrome commands can be rebound to Ctrl, Alt, or Command/MacCtrl as
+    // the primary modifier — watch for release of whichever one was used.
+    if (e.key !== "Control" && e.key !== "Meta" && e.key !== "Alt") return;
 
-    if (e.key === "Control" || e.key === "Meta") {
-      e.preventDefault();
-      switchToSelected();
-    }
+    e.preventDefault();
+    if (!leaveSwitcherOpen) switchToSelected();
+    // else: leave the overlay open — user confirms with Enter or a click
   }, true);
 
   document.addEventListener("keydown", (e) => {
@@ -296,8 +341,30 @@
       switchToSelected();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
+      cycle("forward");
+      return;
+    }
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cycle("backward");
+      return;
+    }
+    if ((e.ctrlKey || e.altKey || e.metaKey) && activationKeys.includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      // Normally chrome.commands consumes this at the browser-chrome level
+      // and the page never sees it — cycling happens via the "cycle"
+      // message from background.js instead. But if some browser/modifier
+      // combo doesn't reliably re-dispatch repeat presses that way (seen
+      // with Alt-based rebinds in some browsers), this keydown leaks
+      // through to the page, so cycle directly rather than doing nothing.
+      const key = e.key.toLowerCase();
+      if (key === cycleKeys.backward.key && e.shiftKey === cycleKeys.backward.shift) {
+        cycle("backward");
+      } else if (key === cycleKeys.forward.key && e.shiftKey === cycleKeys.forward.shift) {
+        cycle("forward");
+      }
     }
   }, true);
 })();

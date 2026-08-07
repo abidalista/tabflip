@@ -2,6 +2,54 @@
 
 let tabs = [];
 let selectedIndex = 1;
+let leaveSwitcherOpen = false;
+
+chrome.storage.sync.get({ leaveSwitcherOpen: false }, (res) => {
+  leaveSwitcherOpen = res.leaveSwitcherOpen === true;
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.leaveSwitcherOpen) {
+    leaveSwitcherOpen = changes.leaveSwitcherOpen.newValue === true;
+  }
+});
+
+// ── Configured shortcut keys ─────────────────────────────────────────
+// While this window has focus, background.js deliberately ignores
+// chrome.commands (see handleCommand) so we handle Q/arrows/etc entirely
+// on our own here — meaning we need to know the *actual* configured key
+// for each command ourselves, whatever the user has rebound them to.
+
+function shortcutKeyToEventKey(token) {
+  const map = {
+    Comma: ",", Period: ".", Space: " ",
+    Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight",
+    Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+    Insert: "Insert", Delete: "Delete", Tab: "Tab",
+  };
+  if (map[token]) return map[token].toLowerCase();
+  if (/^F([1-9]|1[0-2])$/.test(token)) return token.toLowerCase();
+  if (/^[A-Za-z0-9]$/.test(token)) return token.toLowerCase();
+  return null;
+}
+
+// Track Shift alongside the key — the default config binds both commands
+// to the same base key ("Q"), distinguished only by whether Shift is also
+// held, so matching on the key alone isn't enough to tell them apart.
+let cycleKeys = {
+  forward: { key: "q", shift: false },
+  backward: { key: "q", shift: true },
+};
+chrome.commands.getAll((commands) => {
+  for (const cmd of commands || []) {
+    if (!cmd.shortcut) continue;
+    const parts = cmd.shortcut.split("+");
+    const key = shortcutKeyToEventKey(parts[parts.length - 1]);
+    if (!key) continue;
+    const shift = parts.slice(0, -1).includes("Shift");
+    if (cmd.name === "cycle-tab") cycleKeys.forward = { key, shift };
+    else if (cmd.name === "cycle-tab-backward") cycleKeys.backward = { key, shift };
+  }
+});
 
 function render() {
   const container = document.getElementById("cards");
@@ -82,16 +130,31 @@ function switchTo() {
   }
 }
 
-function cycle() {
-  selectedIndex = (selectedIndex + 1) % tabs.length;
+// Safety net: close (without switching) if the window sits untouched for
+// 8s, in case it somehow gets stuck. Never auto-switches on its own, so it
+// can't race ahead of the user actually deciding.
+let stuckTimer = null;
+function resetStuckTimer() {
+  if (stuckTimer) clearTimeout(stuckTimer);
+  stuckTimer = setTimeout(() => window.close(), 8000);
+}
+
+function cycle(direction) {
+  selectedIndex = direction === "backward"
+    ? (selectedIndex - 1 + tabs.length) % tabs.length
+    : (selectedIndex + 1) % tabs.length;
   render();
+  resetStuckTimer();
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────
 
 document.addEventListener("keyup", (e) => {
-  if (e.key === "Control" || e.key === "Meta") {
-    switchTo();
+  // Chrome commands can be rebound to Ctrl, Alt, or Command/MacCtrl as the
+  // primary modifier — watch for release of whichever one was used.
+  if (e.key === "Control" || e.key === "Meta" || e.key === "Alt") {
+    if (!leaveSwitcherOpen) switchTo();
+    // else: leave the window open — user confirms with Enter or a click
   }
 });
 
@@ -99,9 +162,29 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     window.close();
   }
-  if ((e.ctrlKey || e.metaKey) && (e.code === "KeyQ" || e.key === "q")) {
+  if (e.key === "Enter") {
     e.preventDefault();
-    cycle();
+    switchTo();
+    return;
+  }
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+    e.preventDefault();
+    cycle("forward");
+    return;
+  }
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+    e.preventDefault();
+    cycle("backward");
+    return;
+  }
+  if (!(e.ctrlKey || e.altKey || e.metaKey)) return;
+  const key = e.key.toLowerCase();
+  if (key === cycleKeys.backward.key && e.shiftKey === cycleKeys.backward.shift) {
+    e.preventDefault();
+    cycle("backward");
+  } else if (key === cycleKeys.forward.key && e.shiftKey === cycleKeys.forward.shift) {
+    e.preventDefault();
+    cycle("forward");
   }
 });
 
@@ -112,6 +195,7 @@ chrome.runtime.sendMessage({ type: "getMRU" }, (res) => {
     tabs = res.tabs;
     selectedIndex = 1;
     render();
+    resetStuckTimer();
   } else {
     window.close();
   }

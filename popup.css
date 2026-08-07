@@ -80,3 +80,40 @@ kbd {
   color: #555;
   line-height: 1.4;
 }
+
+.tip kbd {
+  height: 16px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.tip code {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  background: #2a2a2a;
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: #999;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setting-label {
+  font-size: 12px;
+  color: #999;
+  line-height: 1.4;
+}
+
+.setting-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #7B61FF;
+  cursor: pointer;
+  flex-shrink: 0;
+}

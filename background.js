@@ -9,7 +9,54 @@ let switcherOpen = false;
 let switcherTabId = null;
 let switcherWindowId = null;
 let stateLoaded = false;
-let autoSwitchTimer = null; // fires when user stops pressing Q
+
+// ── Configured shortcut keys (for arbitrary user-rebound commands) ───
+
+// Maps the trailing (non-modifier) token of a chrome.commands shortcut
+// string (e.g. "Ctrl+Shift+Q" -> "Q") to the KeyboardEvent.key value it
+// produces. Modifiers are handled separately — Chrome only allows Ctrl,
+// Alt, or Command/MacCtrl as a command's primary modifier, so content
+// scripts just watch keyup for all three rather than needing this lookup.
+function shortcutKeyToEventKey(token) {
+  const map = {
+    Comma: ",", Period: ".", Space: " ",
+    Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight",
+    Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+    Insert: "Insert", Delete: "Delete", Tab: "Tab",
+  };
+  if (map[token]) return map[token].toLowerCase();
+  if (/^F([1-9]|1[0-2])$/.test(token)) return token.toLowerCase();
+  if (/^[A-Za-z0-9]$/.test(token)) return token.toLowerCase();
+  return null;
+}
+
+// Reads the *actual* configured key (not modifier) for cycle-tab and
+// cycle-tab-backward, whatever the user has rebound them to. Used so the
+// content script can suppress that key from leaking into a focused input
+// while the overlay is open, and as a fallback to cycle directly if a
+// repeat press ever leaks through instead of going through chrome.commands
+// (see the keydown handler in content.js). Shift is tracked separately
+// since the default config binds both commands to the same base key ("Q"),
+// distinguished only by whether Shift is also held.
+async function getCycleKeys() {
+  const result = {
+    forward: { key: "q", shift: false },
+    backward: { key: "q", shift: true },
+  };
+  try {
+    const commands = await chrome.commands.getAll();
+    for (const cmd of commands) {
+      if (!cmd.shortcut) continue;
+      const parts = cmd.shortcut.split("+");
+      const key = shortcutKeyToEventKey(parts[parts.length - 1]);
+      if (!key) continue;
+      const shift = parts.slice(0, -1).includes("Shift");
+      if (cmd.name === "cycle-tab") result.forward = { key, shift };
+      else if (cmd.name === "cycle-tab-backward") result.backward = { key, shift };
+    }
+  } catch (_) {}
+  return result;
+}
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -187,34 +234,10 @@ async function openFallbackSwitcher(windowId) {
 
 // ── Handle Ctrl+Q ───────────────────────────────────────────────────
 
-// ── Auto-switch: fires 2s after last Q press (fallback for keyup) ──
-
-function resetAutoSwitch() {
-  if (autoSwitchTimer) clearTimeout(autoSwitchTimer);
-  autoSwitchTimer = setTimeout(() => {
-    // Double-check state hasn't changed (race condition prevention)
-    if (switcherOpen && switcherTabId) {
-      try {
-        chrome.tabs.sendMessage(switcherTabId, { type: "autoSwitch" });
-      } catch (_) {}
-      switcherOpen = false;
-      switcherTabId = null;
-    }
-    autoSwitchTimer = null;
-  }, 2000);
-}
-
-function clearAutoSwitch() {
-  if (autoSwitchTimer) { 
-    clearTimeout(autoSwitchTimer); 
-    autoSwitchTimer = null; 
-  }
-}
-
 let commandInFlight = false;
 let commandLock = null;
 
-async function handleCommand() {
+async function handleCommand(direction) {
   // Allow cycling even during in-flight (switcherOpen check handles it)
   // But block duplicate opens
   if (commandInFlight && !switcherOpen) return;
@@ -234,38 +257,32 @@ async function handleCommand() {
   try {
     commandInFlight = true;
     commandLock = Date.now();
+
+    // If the switcher is already open, cycle it directly using the tab we
+    // already know it's on — skip re-querying the active tab entirely.
+    // chrome.tabs.query({active:true, lastFocusedWindow:true}) can return
+    // stale results (e.g. right as the service worker wakes from being
+    // idle-suspended), and we don't need it here anyway: our own tracked
+    // switcherTabId is the source of truth for where the overlay lives. A
+    // genuine tab switch is already caught independently by the
+    // onActivated listener below, which resets switcherOpen.
+    if (switcherOpen && switcherTabId) {
+      try {
+        await chrome.tabs.sendMessage(switcherTabId, { type: "cycle", direction });
+        return;
+      } catch (_) {
+        // Message failed - content script might be gone, reset state and
+        // fall through to open fresh below.
+        switcherOpen = false;
+        switcherTabId = null;
+      }
+    }
+
     const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!activeTab) return;
 
     // Don't operate on the switcher popup window itself
     if (activeTab.windowId === switcherWindowId) return;
-
-    // ── Already open on THIS tab? Just cycle ──
-    if (switcherOpen && switcherTabId === activeTab.id) {
-      try {
-        await chrome.tabs.sendMessage(switcherTabId, { type: "cycle" });
-        // Reset auto-switch: 2s after last Q press, switch automatically
-        resetAutoSwitch();
-        return;
-      } catch (err) {
-        // Message failed - content script might be gone, reset state
-        switcherOpen = false;
-        switcherTabId = null;
-        clearAutoSwitch();
-      }
-    }
-
-    // ── Was open on different tab? Kill it ──
-    if (switcherOpen && switcherTabId) {
-      try { 
-        await chrome.tabs.sendMessage(switcherTabId, { type: "hide" }); 
-      } catch (_) {
-        // Failed to hide, but continue anyway
-      }
-      switcherOpen = false;
-      switcherTabId = null;
-      clearAutoSwitch();
-    }
 
     // ── Can we inject? ──
     const canInject = activeTab.url && /^https?:\/\//.test(activeTab.url);
@@ -275,9 +292,10 @@ async function handleCommand() {
     }
 
     // ── Build tab list and inject in parallel ──
-    const [tabs, scriptOk] = await Promise.all([
+    const [tabs, scriptOk, cycleKeys] = await Promise.all([
       buildTabList(activeTab.windowId),
-      ensureContentScript(activeTab.id)
+      ensureContentScript(activeTab.id),
+      getCycleKeys()
     ]);
 
     if (tabs.length < 2) return;
@@ -289,11 +307,10 @@ async function handleCommand() {
 
     // ── Show overlay ──
     try {
-      const r = await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs });
+      const r = await chrome.tabs.sendMessage(activeTab.id, { type: "showSwitcher", tabs, cycleKeys });
       if (r && r.ok) {
         switcherOpen = true;
         switcherTabId = activeTab.id;
-        resetAutoSwitch();
         return;
       }
     } catch (_) {}
@@ -316,7 +333,6 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
     } catch (_) {}
     switcherOpen = false;
     switcherTabId = null;
-    clearAutoSwitch();
   }
   loadMRU().then(() => {
     pushTab(windowId, tabId);
@@ -334,7 +350,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (switcherTabId === tabId) {
       switcherOpen = false;
       switcherTabId = null;
-      clearAutoSwitch();
     }
   });
 });
@@ -353,7 +368,6 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 chrome.windows.onRemoved.addListener((windowId) => {
   if (windowId === switcherWindowId) {
     switcherWindowId = null;
-    clearAutoSwitch();
   }
   // Clean up MRU stack for closed window
   delete mruStacks[windowId];
@@ -391,7 +405,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 // ── Command ─────────────────────────────────────────────────────────
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "cycle-tab") handleCommand();
+  if (command === "cycle-tab") handleCommand("forward");
+  else if (command === "cycle-tab-backward") handleCommand("backward");
 });
 
 // ── Messaging ───────────────────────────────────────────────────────
@@ -412,7 +427,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "switchTab") {
-    clearAutoSwitch();
     chrome.tabs.update(msg.tabId, { active: true }).catch(() => {});
     switcherOpen = false;
     switcherTabId = null;
@@ -426,7 +440,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "switcherClosed") {
-    clearAutoSwitch();
     switcherOpen = false;
     switcherTabId = null;
     // Also clear window ID if switcher was closed
