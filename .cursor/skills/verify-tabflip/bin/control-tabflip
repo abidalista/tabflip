@@ -1,0 +1,845 @@
+#!/usr/bin/env node
+/**
+ * control-tabflip — drive a disposable Chromium that has TabFlip loaded unpacked.
+ * Verification scaffolding only. Not part of the extension runtime.
+ */
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = process.env.TABFLIP_ROOT
+  ? path.resolve(process.env.TABFLIP_ROOT)
+  : path.resolve(SKILL_DIR, "../../..");
+const EXPECTED_VERSION = "1.4.1";
+const FIXTURE_FILES = {
+  "/alpha": "alpha.html",
+  "/beta": "beta.html",
+  "/gamma": "gamma.html",
+  "/delta": "delta.html",
+  "/epsilon": "epsilon.html",
+};
+const FIXTURE_ORDER = ["/alpha", "/beta", "/gamma", "/delta", "/epsilon"];
+const TITLE = {
+  "/alpha": "Alpha TabFlip fixture",
+  "/beta": "Beta TabFlip fixture",
+  "/gamma": "Gamma TabFlip fixture",
+  "/delta": "Delta TabFlip fixture",
+  "/epsilon": "Epsilon TabFlip fixture",
+};
+
+function runId() {
+  return process.env.TABFLIP_RUN_ID || "latest";
+}
+
+function stateDir(id = runId()) {
+  return process.env.TABFLIP_STATE_DIR || path.join(os.tmpdir(), `tabflip-verify-${id}`);
+}
+
+function statePath(id = runId()) {
+  return path.join(stateDir(id), "state.json");
+}
+
+function artifactsDir() {
+  return process.env.TABFLIP_ARTIFACTS || path.join(SKILL_DIR, "artifacts");
+}
+
+function readState(id = runId()) {
+  const p = statePath(id);
+  if (!fs.existsSync(p)) throw new Error(`No verification instance for run ${id}. Run: control-tabflip launch`);
+  return JSON.parse(fs.readFileSync(p, "utf8"));
+}
+
+function writeState(state) {
+  const dir = stateDir(state.runId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(statePath(state.runId), JSON.stringify(state, null, 2));
+}
+
+function logLine(msg) {
+  const line = `[control-tabflip] ${msg}`;
+  process.stderr.write(line + "\n");
+  try {
+    fs.appendFileSync(path.join(stateDir(), "daemon.log"), line + "\n");
+  } catch (_) {}
+}
+
+function parseArgs(argv) {
+  const flags = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = argv[i + 1];
+      if (!next || next.startsWith("--")) flags[key] = true;
+      else {
+        flags[key] = next;
+        i++;
+      }
+    } else positional.push(a);
+  }
+  return { flags, positional };
+}
+
+function xdotool(args) {
+  const r = spawnSync("xdotool", args, {
+    encoding: "utf8",
+    env: { ...process.env, DISPLAY: process.env.DISPLAY || ":1" },
+  });
+  if (r.status !== 0) {
+    throw new Error(`xdotool ${args.join(" ")} failed (${r.status}): ${r.stderr || r.stdout}`);
+  }
+  return (r.stdout || "").trim();
+}
+
+function ensureDeps() {
+  const mod = path.join(SKILL_DIR, "node_modules/playwright-core");
+  if (!fs.existsSync(mod)) {
+    logLine("Installing playwright-core (verification scaffolding)…");
+    const r = spawnSync("npm", ["install", "--omit=dev"], {
+      cwd: SKILL_DIR,
+      encoding: "utf8",
+      stdio: "inherit",
+    });
+    if (r.status !== 0) throw new Error("npm install failed in verify-tabflip");
+  }
+  const chromeDir = path.join(os.homedir(), ".cache/ms-playwright");
+  const has = fs.existsSync(chromeDir) && fs.readdirSync(chromeDir).some((n) => n.startsWith("chromium-"));
+  if (!has) {
+    logLine("Installing Playwright Chromium (Chrome for Testing)…");
+    const r = spawnSync("npx", ["playwright", "install", "chromium", "--no-shell"], {
+      cwd: SKILL_DIR,
+      encoding: "utf8",
+      stdio: "inherit",
+      env: process.env,
+    });
+    if (r.status !== 0) throw new Error("playwright install chromium failed");
+  }
+}
+
+async function rpc(cmd, params = {}) {
+  const state = readState();
+  const res = await fetch(`http://127.0.0.1:${state.port}/rpc`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-token": state.token,
+    },
+    body: JSON.stringify({ cmd, params }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) {
+    const err = new Error(body.error || `rpc ${cmd} failed (${res.status})`);
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+function printJson(value) {
+  process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+}
+
+function pidAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function cmdLaunch(flags) {
+  const id = flags["run-id"] || runId();
+  process.env.TABFLIP_RUN_ID = id;
+  ensureDeps();
+
+  if (!process.env.DISPLAY) process.env.DISPLAY = ":1";
+
+  try {
+    const existing = readState(id);
+    if (pidAlive(existing.daemonPid)) {
+      const health = await rpc("doctor").catch(() => null);
+      if (health?.ok) {
+        printJson({ ...health, alreadyRunning: true });
+        return;
+      }
+      await cmdStop({ "run-id": id, quiet: true });
+    }
+  } catch (_) {}
+
+  fs.mkdirSync(stateDir(id), { recursive: true });
+  const logFd = fs.openSync(path.join(stateDir(id), "daemon.log"), "a");
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--daemon"], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    env: {
+      ...process.env,
+      TABFLIP_RUN_ID: id,
+      TABFLIP_ROOT: REPO_ROOT,
+      DISPLAY: process.env.DISPLAY,
+    },
+    cwd: SKILL_DIR,
+  });
+  child.unref();
+  fs.closeSync(logFd);
+
+  const deadline = Date.now() + 30000;
+  let lastErr = "timeout waiting for daemon";
+  while (Date.now() < deadline) {
+    await sleep(200);
+    try {
+      const health = await rpc("doctor");
+      if (health.ok) {
+        printJson(health);
+        return;
+      }
+      lastErr = health.error || "doctor not ok";
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+  throw new Error(`launch failed: ${lastErr}. See ${path.join(stateDir(id), "daemon.log")}`);
+}
+
+async function cmdStop(flags = {}) {
+  const id = flags["run-id"] || runId();
+  process.env.TABFLIP_RUN_ID = id;
+  let state;
+  try {
+    state = readState(id);
+  } catch (e) {
+    if (!flags.quiet) printJson({ ok: true, stopped: false, reason: e.message });
+    return;
+  }
+  try {
+    await rpc("stop");
+  } catch (_) {}
+  if (pidAlive(state.daemonPid)) {
+    try {
+      process.kill(state.daemonPid, "SIGTERM");
+    } catch (_) {}
+    const until = Date.now() + 5000;
+    while (Date.now() < until && pidAlive(state.daemonPid)) await sleep(100);
+    if (pidAlive(state.daemonPid)) {
+      try {
+        process.kill(state.daemonPid, "SIGKILL");
+      } catch (_) {}
+    }
+  }
+  if (state.browserPid && pidAlive(state.browserPid)) {
+    try {
+      process.kill(state.browserPid, "SIGTERM");
+    } catch (_) {}
+  }
+  // Drop the profile, never the evidence directory.
+  if (state.profileDir && state.profileDir.includes("tabflip-verify-") && fs.existsSync(state.profileDir)) {
+    fs.rmSync(state.profileDir, { recursive: true, force: true });
+  }
+  try {
+    fs.unlinkSync(statePath(id));
+  } catch (_) {}
+  if (!flags.quiet) {
+    printJson({
+      ok: true,
+      stopped: true,
+      artifacts: artifactsDir(),
+      note: "Proof artifacts were not removed.",
+    });
+  }
+}
+
+function usage() {
+  return `control-tabflip — drive a disposable TabFlip instance
+
+Usage:
+  control-tabflip launch [--run-id ID]
+  control-tabflip doctor
+  control-tabflip stop
+  control-tabflip tabs seed [--count 3|5]
+  control-tabflip tabs list
+  control-tabflip tabs activate --title <title>
+  control-tabflip tabs open --url <url>
+  control-tabflip keyboard open-switcher
+  control-tabflip keyboard cycle
+  control-tabflip keyboard cancel
+  control-tabflip keyboard confirm
+  control-tabflip keyboard tap-command
+  control-tabflip overlay state
+  control-tabflip overlay wait --visible|--hidden
+  control-tabflip overlay snapshot --path FILE
+  control-tabflip overlay screenshot --path FILE
+  control-tabflip overlay click --index N
+  control-tabflip popup open
+  control-tabflip popup snapshot --path FILE
+  control-tabflip popup screenshot --path FILE
+  control-tabflip page screenshot --path FILE
+  control-tabflip windows list
+
+Env:
+  TABFLIP_RUN_ID       instance id (default: latest)
+  TABFLIP_ROOT         extension checkout (default: repo root)
+  TABFLIP_STATE_DIR    override /tmp/tabflip-verify-$RUN_ID
+  TABFLIP_ARTIFACTS    evidence root (default: skill artifacts/)
+  DISPLAY              required for headed Chromium + xdotool (default :1)
+`;
+}
+
+async function mainCli() {
+  const argv = process.argv.slice(2);
+  if (argv[0] === "--daemon") return daemon();
+  const { flags, positional } = parseArgs(argv);
+  if (flags["run-id"]) process.env.TABFLIP_RUN_ID = flags["run-id"];
+  const cmd = positional[0];
+  const sub = positional[1];
+  if (!cmd || cmd === "help" || flags.help) {
+    process.stdout.write(usage());
+    return;
+  }
+  if (cmd === "launch") return cmdLaunch(flags);
+  if (cmd === "stop") return cmdStop(flags);
+  if (cmd === "doctor") return printJson(await rpc("doctor"));
+  if (cmd === "tabs" && sub === "seed") return printJson(await rpc("tabs.seed", { count: Number(flags.count || 3) }));
+  if (cmd === "tabs" && sub === "list") return printJson(await rpc("tabs.list"));
+  if (cmd === "tabs" && sub === "activate") {
+    if (!flags.title) throw new Error("--title is required");
+    return printJson(await rpc("tabs.activate", { title: flags.title }));
+  }
+  if (cmd === "tabs" && sub === "open") {
+    if (!flags.url) throw new Error("--url is required");
+    return printJson(await rpc("tabs.open", { url: flags.url }));
+  }
+  if (cmd === "keyboard" && sub === "open-switcher") return printJson(await rpc("keyboard.openSwitcher"));
+  if (cmd === "keyboard" && sub === "cycle") return printJson(await rpc("keyboard.cycle"));
+  if (cmd === "keyboard" && sub === "cancel") return printJson(await rpc("keyboard.cancel"));
+  if (cmd === "keyboard" && sub === "confirm") return printJson(await rpc("keyboard.confirm"));
+  if (cmd === "keyboard" && sub === "tap-command") return printJson(await rpc("keyboard.tapCommand"));
+  if (cmd === "overlay" && sub === "state") return printJson(await rpc("overlay.state"));
+  if (cmd === "overlay" && sub === "wait") {
+    const visible = Boolean(flags.visible) || !flags.hidden;
+    return printJson(await rpc("overlay.wait", { visible, hidden: Boolean(flags.hidden) }));
+  }
+  if (cmd === "overlay" && sub === "snapshot") {
+    if (!flags.path) throw new Error("--path is required");
+    return printJson(await rpc("overlay.snapshot", { path: flags.path }));
+  }
+  if (cmd === "overlay" && sub === "screenshot") {
+    if (!flags.path) throw new Error("--path is required");
+    return printJson(await rpc("overlay.screenshot", { path: flags.path }));
+  }
+  if (cmd === "overlay" && sub === "click") {
+    if (flags.index === undefined) throw new Error("--index is required");
+    return printJson(await rpc("overlay.click", { index: Number(flags.index) }));
+  }
+  if (cmd === "popup" && sub === "open") return printJson(await rpc("popup.open"));
+  if (cmd === "popup" && sub === "snapshot") {
+    if (!flags.path) throw new Error("--path is required");
+    return printJson(await rpc("popup.snapshot", { path: flags.path }));
+  }
+  if (cmd === "popup" && sub === "screenshot") {
+    if (!flags.path) throw new Error("--path is required");
+    return printJson(await rpc("popup.screenshot", { path: flags.path }));
+  }
+  if (cmd === "page" && sub === "screenshot") {
+    if (!flags.path) throw new Error("--path is required");
+    return printJson(await rpc("page.screenshot", { path: flags.path }));
+  }
+  if (cmd === "windows" && sub === "list") return printJson(await rpc("windows.list"));
+  throw new Error(`unknown command: ${positional.join(" ")}\n${usage()}`);
+}
+
+// ── daemon ──────────────────────────────────────────────────────────
+
+const session = {
+  context: null,
+  sw: null,
+  fixtureServer: null,
+  fixtureOrigin: null,
+  extensionId: null,
+  ctrlHeld: false,
+  popupPage: null,
+};
+
+function fixtureServer() {
+  return new Promise((resolve) => {
+    const srv = createServer((req, res) => {
+      const url = req.url.split("?")[0];
+      const file = FIXTURE_FILES[url];
+      if (!file) {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+      const html = fs.readFileSync(path.join(SKILL_DIR, "fixtures", file));
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(html);
+    });
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      resolve({ srv, origin: `http://127.0.0.1:${port}` });
+    });
+  });
+}
+
+async function activePage() {
+  const pages = session.context.pages().filter((p) => p.url() && !p.url().startsWith("chrome-extension://"));
+  for (const p of pages) {
+    try {
+      if (await p.evaluate(() => document.visibilityState === "visible")) return p;
+    } catch (_) {}
+  }
+  return pages.at(-1) || session.context.pages().at(-1);
+}
+
+async function overlayState() {
+  const page = await activePage();
+  if (!page) return { present: false, reason: "no page" };
+  return page.evaluate(() => {
+    const el = document.getElementById("tabflip-overlay");
+    if (!el) return { present: false, url: location.href, title: document.title };
+    const cs = getComputedStyle(el);
+    const visible = cs.opacity !== "0" && cs.pointerEvents !== "none";
+    const cards = [...document.querySelectorAll("#tabflip-cards > div")].map((c) => ({
+      index: Number(c.dataset.idx),
+      title: c.querySelector(".tf-title")?.textContent || "",
+      hostname: c.querySelector(".tf-url")?.textContent || "",
+      selected: getComputedStyle(c).opacity === "1",
+      hasScreenshot: Boolean(c.querySelector("img")),
+    }));
+    return {
+      present: true,
+      visible,
+      url: location.href,
+      title: document.title,
+      opacity: cs.opacity,
+      cardCount: cards.length,
+      selectedTitle: cards.find((c) => c.selected)?.title || null,
+      cards,
+    };
+  });
+}
+
+async function focusChromeWindow() {
+  const page = await activePage();
+  const title = page ? await page.title() : "";
+  const names = [title, `${title} - Google Chrome for Testing`, `${title} - Chromium`].filter(Boolean);
+  let winId = "";
+  for (const name of names) {
+    const r = spawnSync("xdotool", ["search", "--name", name], {
+      encoding: "utf8",
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ":1" },
+    });
+    if (r.status === 0 && r.stdout.trim()) {
+      winId = r.stdout.trim().split("\n").pop();
+      break;
+    }
+  }
+  if (!winId) {
+    const r = spawnSync("xdotool", ["search", "--class", "Google-chrome"], {
+      encoding: "utf8",
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ":1" },
+    });
+    if (r.status === 0) winId = r.stdout.trim().split("\n").pop();
+  }
+  if (!winId) throw new Error(`Could not find Chromium window for title ${JSON.stringify(title)}`);
+  xdotool(["windowactivate", "--sync", winId]);
+  xdotool(["windowfocus", "--sync", winId]);
+  await sleep(150);
+  return { winId, title };
+}
+
+async function seedTabs(count) {
+  const n = Math.max(2, Math.min(5, count || 3));
+  const origin = session.fixtureOrigin;
+  const wanted = FIXTURE_ORDER.slice(0, n);
+  for (const p of session.context.pages()) {
+    const u = p.url();
+    if (u.startsWith("chrome-extension://") || u.startsWith("chrome://")) continue;
+    // keep pages we will reuse
+  }
+  const httpPages = session.context.pages().filter((p) => /^https?:/.test(p.url()) || p.url() === "about:blank" || p.url() === "");
+  for (let i = 0; i < wanted.length; i++) {
+    const url = origin + wanted[i];
+    let page = httpPages[i];
+    if (!page) page = await session.context.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.bringToFront();
+    await sleep(900);
+  }
+  for (let i = wanted.length; i < httpPages.length; i++) {
+    try {
+      await httpPages[i].close();
+    } catch (_) {}
+  }
+  const last = session.context.pages().find((p) => p.url().endsWith(wanted.at(-1)));
+  if (last) await last.bringToFront();
+  await sleep(200);
+  return tabsList();
+}
+
+async function tabsList() {
+  const pages = [];
+  for (const p of session.context.pages()) {
+    pages.push({ url: p.url(), title: await p.title().catch(() => "") });
+  }
+  const active = await activePage();
+  return {
+    ok: true,
+    fixtureOrigin: session.fixtureOrigin,
+    active: active ? { url: active.url(), title: await active.title() } : null,
+    pages,
+  };
+}
+
+async function doctor() {
+  if (!session.context) return { ok: false, error: "browser not started" };
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "manifest.json"), "utf8"));
+  let swOk = false;
+  let version = null;
+  let shortcut = null;
+  try {
+    const info = await session.sw.evaluate(async () => {
+      const m = chrome.runtime.getManifest();
+      const cmds = await chrome.commands.getAll();
+      const cycle = cmds.find((c) => c.name === "cycle-tab");
+      return { version: m.version, name: m.name, shortcut: cycle?.shortcut || "" };
+    });
+    swOk = true;
+    version = info.version;
+    shortcut = info.shortcut;
+  } catch (e) {
+    return { ok: false, error: `service worker unresponsive: ${e.message}` };
+  }
+  const overlay = await overlayState();
+  const tabs = await tabsList();
+  const httpTabs = tabs.pages.filter((p) => p.url.startsWith(session.fixtureOrigin));
+  const problems = [];
+  if (version !== EXPECTED_VERSION) problems.push(`version ${version} != ${EXPECTED_VERSION}`);
+  if (shortcut !== "Ctrl+Q") problems.push(`cycle-tab shortcut is ${JSON.stringify(shortcut)}, expected "Ctrl+Q"`);
+  if (httpTabs.length < 2) problems.push(`need at least 2 fixture tabs, have ${httpTabs.length}`);
+  if (overlay.visible) problems.push("overlay is already visible; cancel it before driving a new journey");
+  const ok = problems.length === 0 && swOk;
+  return {
+    ok,
+    app: "TabFlip",
+    surface: "Chrome extension overlay",
+    extensionId: session.extensionId,
+    extensionVersion: version,
+    expectedVersion: EXPECTED_VERSION,
+    commandShortcut: shortcut,
+    fixtureOrigin: session.fixtureOrigin,
+    profileDir: readState().profileDir,
+    runId: runId(),
+    httpTabCount: httpTabs.length,
+    active: tabs.active,
+    overlayVisible: Boolean(overlay.visible),
+    problems,
+    manifestName: manifest.name,
+  };
+}
+
+async function handleRpc(cmd, params) {
+  switch (cmd) {
+    case "doctor":
+      return doctor();
+    case "stop":
+      await shutdown();
+      return { ok: true };
+    case "tabs.seed":
+      return seedTabs(params.count);
+    case "tabs.list":
+      return tabsList();
+    case "tabs.activate": {
+      for (const p of session.context.pages()) {
+        const t = await p.title();
+        if (t === params.title) {
+          await p.bringToFront();
+          await sleep(400);
+          return tabsList();
+        }
+      }
+      throw new Error(`No page titled ${params.title}`);
+    }
+    case "tabs.open": {
+      const page = await session.context.newPage();
+      await page.goto(params.url, { waitUntil: "domcontentloaded" });
+      await page.bringToFront();
+      await sleep(400);
+      return tabsList();
+    }
+    case "keyboard.openSwitcher": {
+      await focusChromeWindow();
+      xdotool(["keydown", "--clearmodifiers", "ctrl"]);
+      session.ctrlHeld = true;
+      xdotool(["key", "q"]);
+      const overlay = await waitOverlay(true, 2000);
+      return { ok: true, overlay };
+    }
+    case "keyboard.cycle": {
+      if (!session.ctrlHeld) {
+        xdotool(["keydown", "ctrl"]);
+        session.ctrlHeld = true;
+      }
+      await focusChromeWindow();
+      xdotool(["key", "q"]);
+      await sleep(200);
+      return { ok: true, overlay: await overlayState() };
+    }
+    case "keyboard.cancel": {
+      await focusChromeWindow();
+      xdotool(["key", "Escape"]);
+      if (session.ctrlHeld) {
+        xdotool(["keyup", "ctrl"]);
+        session.ctrlHeld = false;
+      }
+      const overlay = await waitOverlay(false, 2000);
+      return { ok: true, overlay, tabs: await tabsList() };
+    }
+    case "keyboard.confirm": {
+      await focusChromeWindow();
+      if (session.ctrlHeld) {
+        xdotool(["keyup", "ctrl"]);
+        session.ctrlHeld = false;
+      } else {
+        xdotool(["key", "Return"]);
+      }
+      const overlay = await waitOverlay(false, 2000);
+      return { ok: true, overlay, tabs: await tabsList() };
+    }
+    case "keyboard.tapCommand": {
+      await focusChromeWindow();
+      if (session.ctrlHeld) {
+        xdotool(["keyup", "ctrl"]);
+        session.ctrlHeld = false;
+      }
+      const before = await tabsList();
+      xdotool(["key", "--clearmodifiers", "ctrl+q"]);
+      await sleep(400);
+      return { ok: true, before, after: await tabsList(), overlay: await overlayState() };
+    }
+    case "overlay.state":
+      return overlayState();
+    case "overlay.wait":
+      return waitOverlay(!params.hidden, 3000);
+    case "overlay.snapshot": {
+      const state = await overlayState();
+      const out = resolveArtifact(params.path);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.writeFileSync(out, JSON.stringify(state, null, 2));
+      return { ok: true, path: out, state };
+    }
+    case "overlay.screenshot": {
+      const page = await activePage();
+      const out = resolveArtifact(params.path);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      await page.screenshot({ path: out, fullPage: true });
+      return { ok: true, path: out, overlay: await overlayState() };
+    }
+    case "overlay.click": {
+      const page = await activePage();
+      const sel = `#tabflip-cards > div[data-idx="${params.index}"]`;
+      await page.click(sel);
+      const overlay = await waitOverlay(false, 2000);
+      return { ok: true, overlay, tabs: await tabsList() };
+    }
+    case "popup.open": {
+      const url = `chrome-extension://${session.extensionId}/popup.html`;
+      const page = await session.context.newPage();
+      await page.goto(url);
+      session.popupPage = page;
+      const snap = await popupSnapshot(page);
+      return { ok: true, url, snapshot: snap };
+    }
+    case "popup.snapshot": {
+      const page = session.popupPage || session.context.pages().find((p) => p.url().endsWith("/popup.html"));
+      if (!page) throw new Error("Popup is not open. Run: control-tabflip popup open");
+      const snap = await popupSnapshot(page);
+      const out = resolveArtifact(params.path);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.writeFileSync(out, JSON.stringify(snap, null, 2));
+      return { ok: true, path: out, snapshot: snap };
+    }
+    case "popup.screenshot": {
+      const page = session.popupPage || session.context.pages().find((p) => p.url().endsWith("/popup.html"));
+      if (!page) throw new Error("Popup is not open. Run: control-tabflip popup open");
+      const out = resolveArtifact(params.path);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      await page.screenshot({ path: out });
+      return { ok: true, path: out };
+    }
+    case "page.screenshot": {
+      const page = await activePage();
+      const out = resolveArtifact(params.path);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      await page.screenshot({ path: out, fullPage: true });
+      return { ok: true, path: out, url: page.url(), title: await page.title() };
+    }
+    case "windows.list": {
+      const pages = [];
+      for (const p of session.context.pages()) {
+        pages.push({ url: p.url(), title: await p.title().catch(() => "") });
+      }
+      return { ok: true, pages };
+    }
+    default:
+      throw new Error(`unknown rpc ${cmd}`);
+  }
+}
+
+function resolveArtifact(p) {
+  if (path.isAbsolute(p)) return p;
+  return path.resolve(artifactsDir(), p);
+}
+
+async function popupSnapshot(page) {
+  return page.evaluate(() => {
+    const name = document.querySelector(".name")?.textContent?.trim() || "";
+    const tip = document.querySelector(".tip")?.textContent?.trim() || "";
+    const coffee = document.querySelector("a.coffee");
+    const rows = [...document.querySelectorAll(".shortcut-row")].map((r) => ({
+      keys: r.querySelector(".keys")?.innerText.replace(/\s+/g, " ").trim(),
+      label: r.querySelector(".label")?.textContent?.trim(),
+    }));
+    return {
+      title: document.title,
+      name,
+      tip,
+      coffeeText: coffee?.textContent?.trim() || "",
+      coffeeHref: coffee?.getAttribute("href") || "",
+      coffeeTarget: coffee?.getAttribute("target") || "",
+      shortcuts: rows,
+    };
+  });
+}
+
+async function waitOverlay(visible, timeoutMs) {
+  const start = Date.now();
+  let last;
+  while (Date.now() - start < timeoutMs) {
+    last = await overlayState();
+    if (visible && last.visible) return last;
+    if (!visible && !last.visible) return last;
+    await sleep(80);
+  }
+  throw new Error(`overlay did not become ${visible ? "visible" : "hidden"}: ${JSON.stringify(last)}`);
+}
+
+async function shutdown() {
+  try {
+    if (session.ctrlHeld) {
+      spawnSync("xdotool", ["keyup", "ctrl"], { env: { ...process.env, DISPLAY: process.env.DISPLAY || ":1" } });
+      session.ctrlHeld = false;
+    }
+  } catch (_) {}
+  try {
+    await session.context?.close();
+  } catch (_) {}
+  try {
+    session.fixtureServer?.close();
+  } catch (_) {}
+}
+
+async function daemon() {
+  const id = runId();
+  if (!process.env.DISPLAY) process.env.DISPLAY = ":1";
+  const profileDir = path.join(stateDir(id), "profile");
+  fs.rmSync(profileDir, { recursive: true, force: true });
+  fs.mkdirSync(profileDir, { recursive: true });
+
+  const fx = await fixtureServer();
+  session.fixtureServer = fx.srv;
+  session.fixtureOrigin = fx.origin;
+
+  const ext = REPO_ROOT;
+  const { chromium } = await import("playwright-core");
+  session.context = await chromium.launchPersistentContext(profileDir, {
+    headless: false,
+    channel: "chromium",
+    viewport: { width: 1280, height: 800 },
+    args: [
+      `--disable-extensions-except=${ext}`,
+      `--load-extension=${ext}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-sync",
+    ],
+  });
+
+  session.sw = session.context.serviceWorkers()[0];
+  if (!session.sw) session.sw = await session.context.waitForEvent("serviceworker", { timeout: 20000 });
+  session.extensionId = new URL(session.sw.url()).host;
+
+  await seedTabs(3);
+
+  const token = crypto.randomBytes(16).toString("hex");
+  const rpcServer = createServer(async (req, res) => {
+    if (req.url !== "/rpc" || req.method !== "POST") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    if (req.headers["x-token"] !== token) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "bad token" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const { cmd, params } = JSON.parse(body || "{}");
+      const result = await handleRpc(cmd, params || {});
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, ...result }));
+    } catch (e) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+  });
+
+  await new Promise((r) => rpcServer.listen(0, "127.0.0.1", r));
+  const port = rpcServer.address().port;
+  const browserPid = session.context.browser()?.process()?.pid || null;
+  writeState({
+    runId: id,
+    daemonPid: process.pid,
+    browserPid,
+    port,
+    token,
+    extensionId: session.extensionId,
+    fixtureOrigin: session.fixtureOrigin,
+    profileDir,
+    extensionPath: ext,
+    skillDir: SKILL_DIR,
+    startedAt: new Date().toISOString(),
+  });
+  logLine(`ready id=${id} extension=${session.extensionId} fixtures=${session.fixtureOrigin} rpc=127.0.0.1:${port}`);
+
+  const exit = async () => {
+    rpcServer.close();
+    await shutdown();
+    process.exit(0);
+  };
+  process.on("SIGTERM", exit);
+  process.on("SIGINT", exit);
+}
+
+mainCli().catch((e) => {
+  process.stderr.write(e.stack || e.message);
+  process.stderr.write("\n");
+  process.exit(1);
+});

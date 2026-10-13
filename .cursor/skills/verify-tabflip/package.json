@@ -1,0 +1,12 @@
+{
+  "name": "verify-tabflip",
+  "private": true,
+  "description": "Verification scaffolding for TabFlip. Not part of the extension runtime.",
+  "type": "module",
+  "bin": {
+    "control-tabflip": "./bin/control-tabflip"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.0"
+  }
+}
