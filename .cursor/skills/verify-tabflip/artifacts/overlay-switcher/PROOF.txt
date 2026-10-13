@@ -1,0 +1,23 @@
+Feature: overlay-switcher
+Entry point: hold Ctrl+Q on Gamma TabFlip fixture (http fixture tabs)
+Harness: control-tabflip (Playwright Chromium + xdotool), run overlay-proof
+Date: 2026-10-13
+
+Proven
+- overlay-open: Ctrl+Q shows #tabflip-overlay with 3 cards. Selected = Beta.
+  overlay-open.png, overlay-open.snapshot.json
+- overlay-cycle: second Q selects Alpha.
+  overlay-cycled.png, overlay.snapshot.json
+- overlay-confirm-release: cycle to Alpha, release Ctrl, active tab = Alpha TabFlip fixture.
+  after-switch.png
+- overlay-confirm-click: click data-idx=1, active tab = Beta TabFlip fixture.
+  after-click.png
+
+Not proven this run
+- overlay-confirm-enter (Enter key)
+- overlay-cancel (Escape): Ctrl-up / 2s auto-switch raced and switched to Beta.
+  keyboard cancel now sends Escape to the page then releases Ctrl; re-prove on a later run.
+
+Cleanup
+- control-tabflip stop removed /tmp/tabflip-verify-overlay-proof/state.json
+- this artifacts/ directory remained

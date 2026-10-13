@@ -1,0 +1,32 @@
+{
+  "present": true,
+  "visible": true,
+  "url": "http://127.0.0.1:44677/gamma",
+  "title": "Gamma TabFlip fixture",
+  "opacity": "1",
+  "cardCount": 3,
+  "selectedTitle": "Alpha TabFlip fixture",
+  "cards": [
+    {
+      "index": 0,
+      "title": "Gamma TabFlip fixture",
+      "hostname": "127.0.0.1",
+      "selected": false,
+      "hasScreenshot": true
+    },
+    {
+      "index": 1,
+      "title": "Beta TabFlip fixture",
+      "hostname": "127.0.0.1",
+      "selected": false,
+      "hasScreenshot": true
+    },
+    {
+      "index": 2,
+      "title": "Alpha TabFlip fixture",
+      "hostname": "127.0.0.1",
+      "selected": true,
+      "hasScreenshot": true
+    }
+  ]
+}
