@@ -65,10 +65,10 @@ Put the helper on your mental PATH as `control-tabflip` (invoke via the path abo
 Keyboard (real `chrome.commands` path via xdotool):
 
 ```bash
-control-tabflip keyboard open-switcher   # hold Ctrl, press Q; overlay stays up
+control-tabflip keyboard open-switcher   # hold Ctrl, press Q; overlay stays up (retries if the first command misses)
 control-tabflip keyboard cycle           # another Q while Ctrl is held
 control-tabflip keyboard confirm         # release Ctrl → switch to selected tab
-control-tabflip keyboard cancel          # Escape, no switch
+control-tabflip keyboard cancel          # Escape on the page, then release Ctrl — no switch
 control-tabflip keyboard tap-command     # press-and-release Ctrl+Q (quick toggle)
 ```
 

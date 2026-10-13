@@ -397,13 +397,20 @@ function fixtureServer() {
 }
 
 async function activePage() {
-  const pages = session.context.pages().filter((p) => p.url() && !p.url().startsWith("chrome-extension://"));
-  for (const p of pages) {
-    try {
-      if (await p.evaluate(() => document.visibilityState === "visible")) return p;
-    } catch (_) {}
+  let url = null;
+  try {
+    const info = await session.sw.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      return tab ? { url: tab.url, title: tab.title } : null;
+    });
+    url = info?.url || null;
+  } catch (_) {}
+  const pages = session.context.pages();
+  if (url) {
+    const match = pages.find((p) => p.url() === url);
+    if (match) return match;
   }
-  return pages.at(-1) || session.context.pages().at(-1);
+  return pages.find((p) => /^https?:/.test(p.url())) || pages.at(-1);
 }
 
 async function overlayState() {
@@ -486,9 +493,14 @@ async function seedTabs(count) {
       await httpPages[i].close();
     } catch (_) {}
   }
-  const last = session.context.pages().find((p) => p.url().endsWith(wanted.at(-1)));
+  const lastUrl = origin + wanted.at(-1);
+  const last = session.context.pages().find((p) => p.url() === lastUrl);
   if (last) await last.bringToFront();
-  await sleep(200);
+  await session.sw.evaluate(async (targetUrl) => {
+    const tabs = await chrome.tabs.query({ url: targetUrl });
+    if (tabs[0]) await chrome.tabs.update(tabs[0].id, { active: true });
+  }, lastUrl);
+  await sleep(400);
   return tabsList();
 }
 
@@ -584,11 +596,25 @@ async function handleRpc(cmd, params) {
     }
     case "keyboard.openSwitcher": {
       await focusChromeWindow();
-      xdotool(["keydown", "--clearmodifiers", "ctrl"]);
-      session.ctrlHeld = true;
-      xdotool(["key", "q"]);
-      const overlay = await waitOverlay(true, 2000);
-      return { ok: true, overlay };
+      try { xdotool(["keyup", "--clearmodifiers", "ctrl"]); } catch (_) {}
+      session.ctrlHeld = false;
+      let lastErr;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await sleep(80);
+        xdotool(["keydown", "ctrl"]);
+        session.ctrlHeld = true;
+        xdotool(["key", "q"]);
+        try {
+          const overlay = await waitOverlay(true, 2500);
+          return { ok: true, overlay, attempt };
+        } catch (e) {
+          lastErr = e;
+          try { xdotool(["keyup", "ctrl"]); } catch (_) {}
+          session.ctrlHeld = false;
+          await focusChromeWindow();
+        }
+      }
+      throw lastErr;
     }
     case "keyboard.cycle": {
       if (!session.ctrlHeld) {
@@ -601,13 +627,15 @@ async function handleRpc(cmd, params) {
       return { ok: true, overlay: await overlayState() };
     }
     case "keyboard.cancel": {
-      await focusChromeWindow();
-      xdotool(["key", "Escape"]);
+      const page = await activePage();
+      // Page-level Escape hits content.js. xdotool Escape is easy to lose
+      // against a held Ctrl; releasing Ctrl first would confirm instead.
+      await page.keyboard.press("Escape");
+      const overlay = await waitOverlay(false, 2000);
       if (session.ctrlHeld) {
-        xdotool(["keyup", "ctrl"]);
+        try { xdotool(["keyup", "ctrl"]); } catch (_) {}
         session.ctrlHeld = false;
       }
-      const overlay = await waitOverlay(false, 2000);
       return { ok: true, overlay, tabs: await tabsList() };
     }
     case "keyboard.confirm": {
@@ -785,6 +813,10 @@ async function daemon() {
   session.extensionId = new URL(session.sw.url()).host;
 
   await seedTabs(3);
+  try {
+    await focusChromeWindow();
+  } catch (_) {}
+  await sleep(500);
 
   const token = crypto.randomBytes(16).toString("hex");
   const rpcServer = createServer(async (req, res) => {
@@ -813,7 +845,11 @@ async function daemon() {
 
   await new Promise((r) => rpcServer.listen(0, "127.0.0.1", r));
   const port = rpcServer.address().port;
-  const browserPid = session.context.browser()?.process()?.pid || null;
+  let browserPid = null;
+  try {
+    const proc = session.context.browser()?.process?.();
+    if (proc && typeof proc.pid === "number") browserPid = proc.pid;
+  } catch (_) {}
   writeState({
     runId: id,
     daemonPid: process.pid,
